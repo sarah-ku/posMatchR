@@ -665,10 +665,6 @@ add_feature_geometry <- function(gr, resources) {
 }
 
 
-# ----------------------------
-# Sequence context (k-mer)
-# ----------------------------
-
 #' Add sequence k-mer context around each site
 #'
 #' Extracts a centered k-mer from a reference genome and stores it as a metadata column.
@@ -682,6 +678,7 @@ add_feature_geometry <- function(gr, resources) {
 #' @param chrs Optional character vector of seqlevels to keep.
 #'
 #' @returns The input \code{GRanges} with \code{out_col} added to \code{mcols(gr)}.
+#' @export
 add_kmer <- function(gr, genome, k = 5L, out_col = "kmer", seqstyle = NULL, chrs = NULL) {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   if (k < 1L) stop("`k` must be >= 1.")
