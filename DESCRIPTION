@@ -1,0 +1,33 @@
+Package: posMatchR
+Type: Package
+Title: Annotate Sites and Build Matched Backgrounds for DRACH/m6A Analyses
+Version: 0.0.0.9000
+Authors@R: 
+    person("Sarah", "Last", , "first.last@example.com", role = c("aut", "cre"))
+Description: Tools to annotate genomic sites with transcript context and to
+    construct matched or within-transcript background sets for DRACH/m6A analyses.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    GenomicRanges,
+    GenomicFeatures,
+    VariantAnnotation,
+    S4Vectors,
+    IRanges,
+    GenomeInfoDb,
+    Biostrings,
+    ggplot2,
+    rlang,
+    eulerr
+Suggests:
+    AnnotationDbi,
+    TxDb.Hsapiens.UCSC.hg38.knownGene,
+    BSgenome.Hsapiens.UCSC.hg38,
+    BiocManager,
+    gridExtra,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
