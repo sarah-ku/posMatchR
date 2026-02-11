@@ -1506,6 +1506,7 @@ subset_bg_set <- function(gr,
 #' @family plots
 #' @examplesIf requireNamespace("ggplot2", quietly = TRUE)
 #' # p <- plot_metagene_density(gr)
+#' @export
 plot_metagene_density <- function(gr,
                                   set_col = "match_set",
                                   positive_value = "positive",
