@@ -13,6 +13,45 @@ NULL
 
 #' Internal helper
 #' @noRd
+.validate_sites_gr <- function(gr, label_col = "label") {
+  if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
+
+  # Enforce width=1 for point-site annotations
+  if (any(GenomicRanges::width(gr) != 1L)) {
+    warning("Some ranges have width != 1. Resizing to width=1 (fix='center').")
+    gr <- IRanges::resize(gr, width = 1L, fix = "center")
+  }
+
+  # Stable IDs
+  if (is.null(names(gr)) || anyDuplicated(names(gr))) {
+    names(gr) <- paste0("site_", seq_along(gr))
+  }
+
+  # Optional: if label exists and is logical or "0"/"1" as character/factor, coerce to integer.
+  # IMPORTANT: do NOT enforce {0,1} or require both classes here.
+  mc <- S4Vectors::mcols(gr)
+  if (!is.null(label_col) && (label_col %in% colnames(mc))) {
+    y <- mc[[label_col]]
+
+    if (is.logical(y)) {
+      mc[[label_col]] <- as.integer(y)
+    } else if (is.factor(y)) {
+      y_chr <- as.character(y)
+      ok01 <- (!is.na(y_chr)) & (y_chr %in% c("0", "1"))
+      if (all(is.na(y_chr) | ok01)) mc[[label_col]] <- as.integer(y_chr)
+    } else if (is.character(y)) {
+      ok01 <- (!is.na(y)) & (y %in% c("0", "1"))
+      if (all(is.na(y) | ok01)) mc[[label_col]] <- as.integer(y)
+    }
+  }
+  S4Vectors::mcols(gr) <- mc
+
+  gr
+}
+
+
+#' Internal helper
+#' @noRd
 .validate_input_gr <- function(gr, label_col = "label", require_both = TRUE) {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   if (!(label_col %in% colnames(S4Vectors::mcols(gr)))) {
@@ -368,13 +407,18 @@ build_tx_resources <- function(txdb, include_introns = TRUE) {
 #' Annotate candidate sites with transcript context and region geometry
 #'
 #' Assigns each site to a transcript and region (e.g. fiveUTR/coding/threeUTR/intron),
-#' attaches transcript-level length metrics, computes within-feature coordinates (feature_prop)
-#' and a concatenated metagene coordinate (metagene_prop), and optionally maps gene IDs
+#' attaches transcript-level length metrics, computes within-feature coordinates (\code{feature_prop})
+#' and a concatenated metagene coordinate (\code{metagene_prop}), and optionally maps gene IDs
 #' to symbols/names via an \code{OrgDb}.
 #'
-#' @param gr A \code{GRanges} of single-nucleotide sites. Must contain \code{label_col}.
+#' This function does \strong{not} require a \code{label} column. If \code{label_col} exists,
+#' it may be lightly normalized (logical or "0/1" factor/character to integer), but labels
+#' are never validated here.
+#'
+#' @param gr A \code{GRanges} of single-nucleotide sites.
 #' @param txdb A \code{TxDb} object.
-#' @param label_col Metadata column in \code{gr} containing 0/1 labels.
+#' @param label_col Optional name of a label column to preserve/normalize if present
+#'   (default \code{"label"}). Not required.
 #' @param tx_select Which transcript to select if multiple overlap a site.
 #'   \code{"longest"} prefers the transcript with the largest \code{tx_len}.
 #' @param seqstyle Optional seqlevel style (e.g. \code{"UCSC"}).
@@ -397,7 +441,6 @@ build_tx_resources <- function(txdb, include_introns = TRUE) {
 #' @examplesIf requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) && requireNamespace("GenomicRanges", quietly = TRUE)
 #' txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
 #' gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100000, 100000), strand = "+")
-#' S4Vectors::mcols(gr)$label <- 1L
 #' ann <- annotate_sites(gr, txdb = txdb)
 #'
 #' @export
@@ -415,7 +458,10 @@ annotate_sites <- function(gr,
                            gene_name_col = NULL,
                            cache = NULL) {
   tx_select <- match.arg(tx_select)
-  gr <- .validate_input_gr(gr, label_col = label_col, require_both = FALSE)
+
+  # NOTE: no label requirement here
+  gr <- .validate_sites_gr(gr, label_col = label_col)
+
   h <- .harmonize_seqlevels(gr, txdb, seqstyle = seqstyle, chrs = chrs)
   gr <- h$gr; txdb <- h$txdb
 
@@ -424,7 +470,6 @@ annotate_sites <- function(gr,
   }
   tx_metrics <- resources$tx_metrics
 
-  # locateVariants can be sped up by re-using cache across calls :contentReference[oaicite:6]{index=6}
   loc <- suppressWarnings(
     VariantAnnotation::locateVariants(gr, txdb, VariantAnnotation::AllVariants(), cache = cache)
   )
@@ -439,13 +484,12 @@ annotate_sites <- function(gr,
   if ("TXID" %in% colnames(loc_df)) loc_df$TXID <- .first_or_na(loc_df$TXID) else loc_df$TXID <- NA_character_
   if ("GENEID" %in% colnames(loc_df)) loc_df$GENEID <- .first_or_na(loc_df$GENEID) else loc_df$GENEID <- NA_character_
 
-  txid_to_name <- setNames(as.character(tx_metrics$tx_name), as.character(tx_metrics$tx_id))
+  txid_to_name <- stats::setNames(as.character(tx_metrics$tx_name), as.character(tx_metrics$tx_id))
   loc_df$tx_name <- txid_to_name[loc_df$TXID]
 
-  txname_to_len <- setNames(tx_metrics$tx_len, tx_metrics$tx_name)
+  txname_to_len <- stats::setNames(tx_metrics$tx_len, tx_metrics$tx_name)
   loc_df$tx_len <- txname_to_len[loc_df$tx_name]
 
-  # Tie-breaker for rows that differ only by LOCATION (e.g. promoter + intergenic)
   loc_df$.loc_pri <- .location_priority(loc_df$LOCATION)
 
   if (nrow(loc_df) > 0L) {
@@ -460,10 +504,9 @@ annotate_sites <- function(gr,
     loc_sel <- loc_df
   }
 
-  # Ann table aligned to query GRanges
   ann <- S4Vectors::DataFrame(
-    location = rep(NA_character_, length(gr)),  # raw VariantAnnotation term
-    feature  = rep(NA_character_, length(gr)),  # collapsed label (CDS/5UTR/3UTR/...)
+    location = rep(NA_character_, length(gr)),
+    feature  = rep(NA_character_, length(gr)),
     gene_id  = rep(NA_character_, length(gr)),
     tx_id    = rep(NA_character_, length(gr)),
     tx_name  = rep(NA_character_, length(gr))
@@ -482,23 +525,19 @@ annotate_sites <- function(gr,
   ann$location[is.na(ann$location)] <- "unannotated"
   ann$feature <- .map_location_to_feature(ann$location)
 
-  # Attach transcript-level metrics (tx_len, cds_len, utr lengths, etc.)
   txm <- tx_metrics
-  # Avoid duplicating gene_id in mcols (your output had gene_id twice)
   keep_cols <- setdiff(colnames(txm), c("tx_id", "tx_name", "gene_id"))
   tx_match <- match(ann$tx_name, txm$tx_name)
 
   tx_attached <- S4Vectors::DataFrame()
   for (cl in keep_cols) {
-    tx_attached[,cl] <- txm[[cl]][tx_match]
+    tx_attached[, cl] <- txm[[cl]][tx_match]
   }
 
-  mcols(gr) <- cbind(mcols(gr), ann, tx_attached)
+  S4Vectors::mcols(gr) <- cbind(S4Vectors::mcols(gr), ann, tx_attached)
 
-  # Add feature geometry + feature_prop / metagene_prop
   gr <- add_feature_geometry(gr, resources = resources)
 
-  # Optional gene symbol mapping (works if you provide an OrgDb)
   gr <- .add_gene_symbols(
     gr,
     orgdb = orgdb,
