@@ -21,11 +21,12 @@ annotate_sites(
 )
 }
 \arguments{
-\item{gr}{A \code{GRanges} of single-nucleotide sites. Must contain \code{label_col}.}
+\item{gr}{A \code{GRanges} of single-nucleotide sites.}
 
 \item{txdb}{A \code{TxDb} object.}
 
-\item{label_col}{Metadata column in \code{gr} containing 0/1 labels.}
+\item{label_col}{Optional name of a label column to preserve/normalize if present
+(default \code{"label"}). Not required.}
 
 \item{tx_select}{Which transcript to select if multiple overlap a site.
 \code{"longest"} prefers the transcript with the largest \code{tx_len}.}
@@ -55,15 +56,19 @@ and (if requested) gene symbol/name columns.
 }
 \description{
 Assigns each site to a transcript and region (e.g. fiveUTR/coding/threeUTR/intron),
-attaches transcript-level length metrics, computes within-feature coordinates (feature_prop)
-and a concatenated metagene coordinate (metagene_prop), and optionally maps gene IDs
+attaches transcript-level length metrics, computes within-feature coordinates (\code{feature_prop})
+and a concatenated metagene coordinate (\code{metagene_prop}), and optionally maps gene IDs
 to symbols/names via an \code{OrgDb}.
+}
+\details{
+This function does \strong{not} require a \code{label} column. If \code{label_col} exists,
+it may be lightly normalized (logical or "0/1" factor/character to integer), but labels
+are never validated here.
 }
 \examples{
 \dontshow{if (requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) && requireNamespace("GenomicRanges", quietly = TRUE)) withAutoprint(\{ # examplesIf}
 txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
 gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100000, 100000), strand = "+")
-S4Vectors::mcols(gr)$label <- 1L
 ann <- annotate_sites(gr, txdb = txdb)
 \dontshow{\}) # examplesIf}
 }
