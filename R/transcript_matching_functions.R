@@ -2037,5 +2037,321 @@ assign_split_by_chromosome <- function(gr,
 
 
 
+#' Write classification-ready HDF5 splits (train/val/test) from a single GRanges
+#'
+#' This function expects a GRanges that already contains both positives and negatives
+#' (e.g. after subsetting to matched pairs) and already contains a split column
+#' indicating train/val/test membership.
+#'
+#' For each site, it extracts a centered sequence window (2*flank+1 bp) from the
+#' reference genome, pads out-of-bounds sequence with 'N', orients sequences by strand
+#' (reverse-complement for '-' strand), and encodes bases as integers:
+#' A=0, C=1, G=2, T=3, N=4. The encoded matrix is written as dataset "X_int", and labels
+#' as dataset "y" in HDF5 files {train,val,test}.h5.
+#'
+#' @param gr A GRanges containing both classes (label 0/1) and a split column.
+#' @param bsgenome A BSgenome object (or any object supported by Biostrings::getSeq()).
+#' @param out_dir Output directory.
+#' @param prefix Subdirectory name inside out_dir where files will be written.
+#' @param flank Integer flank size; window width is 2*flank + 1 (default 500).
+#' @param label_col Metadata column containing 0/1 class labels (default "label").
+#' @param split_col Metadata column containing split labels (default "split").
+#' @param id_col Metadata column containing unique IDs (default "id"). If missing, one is created.
+#' @param chunk_n Chunk size for HDF5 writing (rows per write block).
+#' @param compression_level gzip compression level for X_int (0-9; default 6).
+#' @param overwrite If TRUE, overwrite existing .h5 files.
+#' @param balance_train If TRUE, downsample the *training* split to balance labels 0/1.
+#' @param seed Random seed (used for balancing only).
+#' @param metadata_col metadata columns (from mcols(gr)) to write to CSV.
+#'        If NULL, a sensible default set is attempted (only columns that exist are used).
+#' @param drop_unknown_splits If TRUE, rows with split labels not mappable to train/val/test are dropped.
+#' @param quiet If TRUE, suppress messages.
+#'
+#' @return Invisibly returns the output directory path (file.path(out_dir, prefix)).
+#' @export
+write_h5_classification_from_granges <- function(gr,
+                                                 bsgenome,
+                                                 out_dir  = "bpnet_data",
+                                                 prefix   = "dataset_cls",
+                                                 flank    = 500L,
+                                                 label_col = "label",
+                                                 split_col = "split",
+                                                 id_col    = "id",
+                                                 chunk_n   = 10000L,
+                                                 compression_level = 6L,
+                                                 overwrite = TRUE,
+                                                 balance_train = FALSE,
+                                                 seed = 1337L,
+                                                 metadata_cols = NULL,
+                                                 drop_unknown_splits = TRUE,
+                                                 quiet = FALSE) {
+  stopifnot(inherits(gr, "GRanges"))
 
+  # ---- dependency guard (Suggests-friendly) ----
+  if (!requireNamespace("rhdf5", quietly = TRUE)) {
+    stop("Package 'rhdf5' is required for HDF5 output. Install via BiocManager::install('rhdf5').")
+  }
+
+  mc <- S4Vectors::mcols(gr)
+
+  if (!(label_col %in% colnames(mc))) stop("Missing label_col in mcols(gr): ", label_col)
+  if (!(split_col %in% colnames(mc))) stop("Missing split_col in mcols(gr): ", split_col)
+
+  # Stable rownames/IDs
+  if (is.null(names(gr)) || anyDuplicated(names(gr))) {
+    names(gr) <- paste0("site_", seq_len(length(gr)))
+  }
+
+  # Ensure id column exists (for downstream metadata + python join keys)
+  if (!(id_col %in% colnames(mc))) {
+    mc[[id_col]] <- paste0(as.character(GenomicRanges::seqnames(gr)), "_",
+                           GenomicRanges::start(gr), "_",
+                           as.character(GenomicRanges::strand(gr)))
+    S4Vectors::mcols(gr) <- mc
+    mc <- S4Vectors::mcols(gr)
+  }
+
+  # Labels -> integer 0/1 (but don't require both classes per split)
+  y <- mc[[label_col]]
+  if (is.logical(y)) y <- as.integer(y)
+  if (is.factor(y))  y <- as.integer(as.character(y))
+  y <- as.integer(y)
+  if (any(!is.na(y) & !(y %in% c(0L, 1L)))) {
+    stop("`", label_col, "` must be 0/1 (or coercible to 0/1).")
+  }
+
+  # ---- standardize split labels to {train,val,test} ----
+  split_raw <- as.character(mc[[split_col]])
+  split_std <- tolower(split_raw)
+  split_std[split_std %in% c("training", "train")] <- "train"
+  split_std[split_std %in% c("validation", "valid", "val")] <- "val"
+  split_std[split_std %in% c("testing", "test")] <- "test"
+
+  ok_split <- split_std %in% c("train", "val", "test")
+  if (drop_unknown_splits) {
+    if (!all(ok_split)) {
+      gr <- gr[ok_split]
+      split_std <- split_std[ok_split]
+      y <- y[ok_split]
+      mc <- S4Vectors::mcols(gr)
+      if (!quiet) message("Dropped ", sum(!ok_split), " rows with unknown split labels in `", split_col, "`.")
+    }
+  } else {
+    if (any(!ok_split)) {
+      stop("Found split labels not mappable to {train,val,test} in `", split_col, "`.")
+    }
+  }
+
+  if (length(gr) == 0L) stop("After split filtering, gr has 0 rows.")
+
+  # ---- optional balancing within training split ----
+  if (balance_train) {
+    set.seed(seed)
+    tr_idx <- which(split_std == "train")
+    if (length(tr_idx)) {
+      tr_pos <- tr_idx[y[tr_idx] == 1L]
+      tr_neg <- tr_idx[y[tr_idx] == 0L]
+      if (length(tr_pos) && length(tr_neg)) {
+        n_min <- min(length(tr_pos), length(tr_neg))
+        keep_train <- c(sample(tr_pos, n_min), sample(tr_neg, n_min))
+        keep_all <- c(keep_train, setdiff(seq_len(length(gr)), tr_idx))
+        keep_all <- sort(keep_all)
+        gr <- gr[keep_all]
+        split_std <- split_std[keep_all]
+        y <- y[keep_all]
+        mc <- S4Vectors::mcols(gr)
+        if (!quiet) message("Balanced training split to ", n_min, " positives and ", n_min, " negatives.")
+      }
+    }
+  }
+
+  # ---- harmonize seqlevels against genome ----
+  # Use genome style where possible, keep only common seqlevels, and set seqinfo.
+  st <- GenomeInfoDb::seqlevelsStyle(bsgenome)
+  if (length(st) > 0L) {
+    suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- st[1], silent = TRUE))
+  }
+  gr <- GenomeInfoDb::keepStandardChromosomes(gr, pruning.mode = "coarse")
+  common <- intersect(GenomeInfoDb::seqlevels(gr), GenomicRanges::seqnames(bsgenome))
+  gr <- GenomeInfoDb::keepSeqlevels(gr, common, pruning.mode = "coarse")
+  GenomeInfoDb::seqinfo(gr) <- GenomeInfoDb::seqinfo(bsgenome)[GenomeInfoDb::seqlevels(gr)]
+
+  # Also subset vectors after pruning
+  idx_keep <- rep(TRUE, length(split_std))
+  # Note: keepSeqlevels changes length(gr) but keeps order; we must realign by names
+  # Safest is to re-pull split/y from mcols after pruning if split/label exist.
+  mc <- S4Vectors::mcols(gr)
+  y <- mc[[label_col]]
+  if (is.logical(y)) y <- as.integer(y)
+  if (is.factor(y))  y <- as.integer(as.character(y))
+  y <- as.integer(y)
+  split_raw <- as.character(mc[[split_col]])
+  split_std <- tolower(split_raw)
+  split_std[split_std %in% c("training", "train")] <- "train"
+  split_std[split_std %in% c("validation", "valid", "val")] <- "val"
+  split_std[split_std %in% c("testing", "test")] <- "test"
+
+  # ---- build windows + N padding + strand orientation ----
+  flank <- as.integer(flank)
+  if (!is.finite(flank) || flank < 0L) stop("`flank` must be a non-negative integer.")
+  win_width <- as.integer(2L * flank + 1L)
+
+  gr_win <- GenomicRanges::resize(gr, width = win_width, fix = "center", ignore.strand = FALSE)
+
+  starts <- GenomicRanges::start(gr_win)
+  ends   <- GenomicRanges::end(gr_win)
+
+  seqlen <- GenomeInfoDb::seqlengths(gr_win)[as.character(GenomicRanges::seqnames(gr_win))]
+  left_pad  <- pmax(1L - starts, 0L)
+  right_pad <- pmax(ends - seqlen, 0L)
+
+  gr_trim <- GenomicRanges::trim(gr_win)
+
+  seqs_core <- Biostrings::getSeq(bsgenome, gr_trim)
+
+  # Cache N pads up to flank for speed
+  pad_cache <- vector("list", flank + 1L)
+  pad_cache[[1]] <- Biostrings::DNAString("")
+  if (flank > 0L) {
+    for (i in seq_len(flank)) {
+      pad_cache[[i + 1L]] <- Biostrings::DNAString(paste(rep("N", i), collapse = ""))
+    }
+  }
+  padN <- function(n) pad_cache[[as.integer(n) + 1L]]
+
+  seqs_full <- Biostrings::DNAStringSet(
+    mapply(
+      function(s, lp, rp) Biostrings::xscat(padN(lp), s, padN(rp)),
+      seqs_core, as.integer(left_pad), as.integer(right_pad),
+      SIMPLIFY = FALSE
+    )
+  )
+  if (!all(Biostrings::width(seqs_full) == win_width)) {
+    stop("Internal error: not all sequences are the expected width (", win_width, ").")
+  }
+
+  minus <- as.character(GenomicRanges::strand(gr_win)) == "-"
+  if (any(minus, na.rm = TRUE)) {
+    seqs_full[minus] <- Biostrings::reverseComplement(seqs_full[minus])
+  }
+
+  # ---- encoder: A/C/G/T/N -> 0/1/2/3/4 ----
+  encode_block <- function(seqs_chr) {
+    s <- toupper(seqs_chr)
+    s <- chartr("U", "T", s)
+    s <- gsub("[^ACGTN]", "N", s)     # squash any IUPAC ambiguity to N
+    s <- chartr("ACGTN", "01234", s)
+
+    B <- length(s)
+    L <- nchar(s[1L])
+    out <- matrix(NA_integer_, nrow = B, ncol = L)
+
+    z <- utf8ToInt("0")  # 48
+    for (i in seq_len(B)) {
+      out[i, ] <- utf8ToInt(s[i]) - z
+    }
+    out
+  }
+
+  # ---- metadata column selection ----
+  if (is.null(metadata_cols)) {
+    # conservative defaults: scalar-ish columns that are often useful
+    candidate <- c("motif", "kmer", "location", "feature", "tx_name", "gene_id",
+                   "gene_symbol", "metagene_prop",
+                   "feature_width", "segment_rank",
+                   "dist_from_feature_start", "dist_from_feature_end",
+                   "start_dist", "stop_dist")
+    metadata_cols <- intersect(candidate, colnames(mc))
+  } else {
+    metadata_cols <- intersect(as.character(metadata_cols), colnames(mc))
+  }
+
+  coerce_scalar <- function(x) {
+    if (inherits(x, "DNAStringSet")) return(as.character(x))
+    if (!is.null(dim(x))) return(NULL)  # drop matrices/arrays
+    if (inherits(x, "List") || is.list(x)) {
+      # first element (or NA) per row
+      return(vapply(x, function(z) if (length(z)) as.character(z[[1]]) else NA_character_, character(1)))
+    }
+    # atomic vector
+    if (is.factor(x)) x <- as.character(x)
+    x
+  }
+
+  # ---- per-split writer ----
+  out_dir_split <- file.path(out_dir, prefix)
+  dir.create(out_dir_split, showWarnings = FALSE, recursive = TRUE)
+
+  write_one_split <- function(split_name) {
+    idx <- which(split_std == split_name)
+    if (!length(idx)) return(invisible(NULL))
+
+    h5file <- file.path(out_dir_split, paste0(split_name, ".h5"))
+    if (file.exists(h5file)) {
+      if (overwrite) file.remove(h5file) else stop("File exists and overwrite=FALSE: ", h5file)
+    }
+
+    seqs_split <- seqs_full[idx]
+    y_split <- as.integer(y[idx])
+    ids_split <- as.character(mc[[id_col]][idx])
+
+    N <- length(seqs_split)
+    L <- Biostrings::width(seqs_split)[1L]
+
+    rhdf5::h5createFile(h5file)
+    rhdf5::h5createDataset(
+      h5file, "X_int",
+      dims = c(N, L),
+      storage.mode = "integer",
+      chunk = c(min(N, as.integer(chunk_n)), L),
+      level = as.integer(compression_level)
+    )
+    rhdf5::h5createDataset(h5file, "y", dims = N, storage.mode = "integer")
+    rhdf5::h5write(y_split, h5file, "y")
+
+    # Chunked write
+    blocks <- split(seq_len(N), ceiling(seq_len(N) / as.integer(chunk_n)))
+    for (b in seq_along(blocks)) {
+      rows <- blocks[[b]]
+      Xblk <- encode_block(as.character(seqs_split[rows]))
+      rhdf5::h5write(Xblk, h5file, "X_int", index = list(rows, seq_len(L)))
+    }
+
+    # Metadata CSV (kept simple + robust)
+    meta <- data.frame(
+      id       = ids_split,
+      split    = split_name,
+      seqnames = as.character(GenomicRanges::seqnames(gr)[idx]),
+      start    = GenomicRanges::start(gr)[idx],
+      end      = GenomicRanges::end(gr)[idx],
+      strand   = as.character(GenomicRanges::strand(gr)[idx]),
+      label    = y_split,
+      stringsAsFactors = FALSE
+    )
+
+    if (length(metadata_cols)) {
+      for (nm in metadata_cols) {
+        v <- coerce_scalar(mc[[nm]][idx])
+        if (!is.null(v)) meta[[nm]] <- v
+      }
+    }
+
+    meta_path <- file.path(out_dir_split, paste0(split_name, "_metadata.csv"))
+    utils::write.csv(meta, meta_path, row.names = FALSE)
+
+    rhdf5::H5close()
+
+    if (!quiet) {
+      message(sprintf("Wrote %s: X_int[%d x %d], y[%d] -> %s",
+                      split_name, N, L, N, h5file))
+    }
+    invisible(h5file)
+  }
+
+  write_one_split("train")
+  write_one_split("val")
+  write_one_split("test")
+
+  invisible(out_dir_split)
+}
 
