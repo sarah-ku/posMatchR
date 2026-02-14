@@ -1801,23 +1801,28 @@ plot_kmer_counts <- function(gr,
 #' @returns A \code{GRanges} containing only matched pairs (2 rows per pair).
 #' @export
 subset_matched_pairs <- function(gr,
-                                 # canonical columns produced by match_background_simple() and random_drach_within_transcript()
+                                 # canonical columns produced by match_background() / random_drach_within_transcript()
                                  matched_negative_id_col = "matched_negative_id",
                                  matched_positive_id_col = "matched_positive_id",
                                  is_positive_col = NULL,   # if NULL, will fall back to label_col
                                  label_col = "label",
                                  strict_reciprocal = TRUE, # enforce neg->pos points back correctly
                                  drop_conflicts = TRUE,    # drop duplicate neg assignments if present
+                                 # NEW: keep all rows in testing split (raw/unbalanced)
+                                 maintain_testing = NULL,  # column name (e.g. "dataset_split") or NULL
+                                 testing_value = "testing",
                                  return_diagnostics = TRUE) {
   stopifnot(inherits(gr, "GRanges"))
 
   mc <- S4Vectors::mcols(gr)
 
+  # Stable row names used as IDs
   if (is.null(names(gr)) || anyDuplicated(names(gr))) {
     names(gr) <- paste0("site_", seq_len(length(gr)))
   }
   ids <- names(gr)
 
+  # Required match columns
   if (!(matched_negative_id_col %in% colnames(mc))) {
     stop("Missing `", matched_negative_id_col, "` in mcols(gr). Cannot subset to matched pairs.")
   }
@@ -1825,7 +1830,41 @@ subset_matched_pairs <- function(gr,
     stop("strict_reciprocal=TRUE but missing `", matched_positive_id_col, "` in mcols(gr).")
   }
 
-  # Determine which rows are positives
+  # -------------------------
+  # NEW: define testing rows to preserve
+  # -------------------------
+  testing_idx <- integer(0)
+  work_idx <- seq_along(gr)  # rows on which we will construct matched-pair subset
+
+  if (!is.null(maintain_testing)) {
+    if (!(maintain_testing %in% colnames(mc))) {
+      stop("maintain_testing='", maintain_testing, "' but column not found in mcols(gr). ",
+           "Did you run assign_split_by_chromosome(..., split_col='", maintain_testing, "') first?")
+    }
+    split_vec <- as.character(mc[[maintain_testing]])
+    testing_idx <- which(!is.na(split_vec) & split_vec == testing_value)
+    work_idx <- setdiff(work_idx, testing_idx)
+
+    # If everything is testing, return full GRanges unchanged
+    if (!length(work_idx)) {
+      out <- gr
+      if (return_diagnostics) {
+        attr(out, "subset_pairs_diagnostics") <- list(
+          n_total_in = length(gr),
+          maintain_testing = maintain_testing,
+          testing_value = testing_value,
+          n_testing_in = length(testing_idx),
+          n_pairs_out_non_testing = 0L,
+          note = "All rows are in testing; returning input unchanged."
+        )
+      }
+      return(out)
+    }
+  }
+
+  # -------------------------
+  # Determine positives *within work_idx*
+  # -------------------------
   if (!is.null(is_positive_col) && (is_positive_col %in% colnames(mc))) {
     pos_flag <- mc[[is_positive_col]]
     if (is.logical(pos_flag)) pos_flag <- as.integer(pos_flag)
@@ -1833,13 +1872,18 @@ subset_matched_pairs <- function(gr,
     pos_flag <- as.integer(pos_flag)
     pos_idx_all <- which(pos_flag == 1L)
   } else {
-    if (!(label_col %in% colnames(mc))) stop("Missing `", label_col, "` in mcols(gr).")
+    if (!(label_col %in% colnames(mc))) {
+      stop("Missing `", label_col, "` in mcols(gr).")
+    }
     y <- mc[[label_col]]
     if (is.logical(y)) y <- as.integer(y)
     if (is.factor(y))  y <- as.integer(as.character(y))
     y <- as.integer(y)
     pos_idx_all <- which(y == 1L)
   }
+
+  # Only match/subset pairs outside testing
+  pos_idx_all <- intersect(pos_idx_all, work_idx)
 
   # Build (positive_id -> negative_id) table from the *positive* rows
   neg_id_for_pos <- as.character(mc[[matched_negative_id_col]][pos_idx_all])
@@ -1849,9 +1893,9 @@ subset_matched_pairs <- function(gr,
   pos_ids <- ids[pos_idx]
   neg_ids <- neg_id_for_pos[ok]
 
-  # Keep only pairs where the referenced negative exists in this GRanges
+  # Keep only pairs where the referenced negative exists AND is outside testing
   neg_idx <- match(neg_ids, ids)
-  ok2 <- !is.na(neg_idx)
+  ok2 <- !is.na(neg_idx) & (neg_idx %in% work_idx)
 
   pos_idx <- pos_idx[ok2]
   pos_ids <- pos_ids[ok2]
@@ -1859,20 +1903,27 @@ subset_matched_pairs <- function(gr,
   neg_idx <- neg_idx[ok2]
 
   if (!length(pos_idx)) {
-    out <- gr[0]
+    # No pairs found outside testing
+    keep_idx <- testing_idx
+    out <- gr[keep_idx]
+
     if (return_diagnostics) {
       attr(out, "subset_pairs_diagnostics") <- list(
-        n_total = length(gr),
-        n_pos_total = length(pos_idx_all),
-        n_pos_with_match = 0L,
-        n_pairs = 0L,
-        reason = "No positives with a valid matched_negative_id."
+        n_total_in = length(gr),
+        n_total_out = length(out),
+        n_pos_total_in = length(pos_idx_all),
+        n_pairs_out_non_testing = 0L,
+        maintain_testing = maintain_testing,
+        testing_value = testing_value,
+        n_testing_in = length(testing_idx),
+        n_testing_out = length(testing_idx),
+        reason = "No positives outside testing with a valid matched_negative_id pointing to a non-testing negative."
       )
     }
     return(out)
   }
 
-  # Optional: drop duplicated negative assignments (should not happen, but prevents imbalance)
+  # Optional: drop duplicated negative assignments
   if (drop_conflicts) {
     dup_neg <- duplicated(neg_ids)
     if (any(dup_neg)) {
@@ -1895,31 +1946,39 @@ subset_matched_pairs <- function(gr,
     neg_idx <- neg_idx[ok3]
   }
 
-  # Final balanced set: exactly one positive + one negative per remaining pair
-  keep_idx <- unique(c(pos_idx, neg_idx))
+  # Final keep set:
+  # - balanced pairs from non-testing
+  # - plus ALL testing rows (raw)
+  keep_pairs_idx <- unique(c(pos_idx, neg_idx))
+  keep_idx <- unique(c(keep_pairs_idx, testing_idx))
+
   out <- gr[keep_idx]
 
-  # (Optional) diagnostics
   if (return_diagnostics) {
-    # recompute counts inside output
     mc2 <- S4Vectors::mcols(out)
-    # try label
+
     y2 <- if (label_col %in% colnames(mc2)) as.integer(mc2[[label_col]]) else rep(NA_integer_, length(out))
+    split2 <- if (!is.null(maintain_testing) && maintain_testing %in% colnames(mc2)) as.character(mc2[[maintain_testing]]) else NULL
+
     attr(out, "subset_pairs_diagnostics") <- list(
       n_total_in = length(gr),
       n_total_out = length(out),
-      n_pos_total_in = length(pos_idx_all),
-      n_pairs_out = length(pos_idx),
-      expected_rows_out = 2L * length(pos_idx),
-      n_pos_out = sum(y2 == 1L, na.rm = TRUE),
-      n_neg_out = sum(y2 == 0L, na.rm = TRUE),
+      n_pairs_out_non_testing = length(pos_idx),
+      expected_rows_out_non_testing = 2L * length(pos_idx),
       strict_reciprocal = strict_reciprocal,
-      drop_conflicts = drop_conflicts
+      drop_conflicts = drop_conflicts,
+      maintain_testing = maintain_testing,
+      testing_value = testing_value,
+      n_testing_in = length(testing_idx),
+      n_testing_out = if (is.null(split2)) NA_integer_ else sum(!is.na(split2) & split2 == testing_value),
+      n_pos_out = sum(y2 == 1L, na.rm = TRUE),
+      n_neg_out = sum(y2 == 0L, na.rm = TRUE)
     )
   }
 
   out
 }
+
 
 
 #' Euler/Venn-style overlap plot from a named list
