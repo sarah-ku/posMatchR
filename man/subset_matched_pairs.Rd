@@ -12,6 +12,8 @@ subset_matched_pairs(
   label_col = "label",
   strict_reciprocal = TRUE,
   drop_conflicts = TRUE,
+  maintain_testing = NULL,
+  testing_value = "testing",
   return_diagnostics = TRUE
 )
 }

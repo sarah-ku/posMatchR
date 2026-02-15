@@ -2453,3 +2453,25 @@ write_h5_classification_from_granges <- function(gr,
   invisible(out_dir_split)
 }
 
+
+#' Internal helper for setting names
+#' @noRd
+.site_id <- function(gr,strand=TRUE){
+  if(strand){
+    paste0(as.character(seqnames(gr)), ":", start(gr), ":", as.character(strand(gr)))
+  }else{
+    paste0(as.character(seqnames(gr)), ":", start(gr))
+  }
+}
+
+
+#' Add site id according to genomic coordinates to a GRange
+#'
+#' @param strand whether or not to include the strand as part of the id
+#'
+#' @return the same GRange with the names set
+#' @export
+makeID <- function(gr,strand=TRUE) {
+  names(gr) <- .site_id(gr,strand)
+  gr
+}
