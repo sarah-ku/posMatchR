@@ -7,746 +7,6 @@
 #' @importFrom eulerr euler
 NULL
 
-# ----------------------------
-# Utilities / validation
-# ----------------------------
-
-#' Internal helper
-#' @noRd
-.validate_sites_gr <- function(gr, label_col = "label") {
-  if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
-
-  # Enforce width=1 for point-site annotations
-  if (any(GenomicRanges::width(gr) != 1L)) {
-    warning("Some ranges have width != 1. Resizing to width=1 (fix='center').")
-    gr <- IRanges::resize(gr, width = 1L, fix = "center")
-  }
-
-  # Stable IDs
-  if (is.null(names(gr)) || anyDuplicated(names(gr))) {
-    names(gr) <- paste0("site_", seq_along(gr))
-  }
-
-  # Optional: if label exists and is logical or "0"/"1" as character/factor, coerce to integer.
-  # IMPORTANT: do NOT enforce {0,1} or require both classes here.
-  mc <- S4Vectors::mcols(gr)
-  if (!is.null(label_col) && (label_col %in% colnames(mc))) {
-    y <- mc[[label_col]]
-
-    if (is.logical(y)) {
-      mc[[label_col]] <- as.integer(y)
-    } else if (is.factor(y)) {
-      y_chr <- as.character(y)
-      ok01 <- (!is.na(y_chr)) & (y_chr %in% c("0", "1"))
-      if (all(is.na(y_chr) | ok01)) mc[[label_col]] <- as.integer(y_chr)
-    } else if (is.character(y)) {
-      ok01 <- (!is.na(y)) & (y %in% c("0", "1"))
-      if (all(is.na(y) | ok01)) mc[[label_col]] <- as.integer(y)
-    }
-  }
-  S4Vectors::mcols(gr) <- mc
-
-  gr
-}
-
-
-#' Internal helper
-#' @noRd
-.validate_input_gr <- function(gr, label_col = "label", require_both = TRUE) {
-  if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
-  if (!(label_col %in% colnames(S4Vectors::mcols(gr)))) {
-    stop("`gr` must contain a metadata column named `", label_col, "`.")
-  }
-
-  y <- S4Vectors::mcols(gr)[[label_col]]
-  if (is.logical(y)) y <- as.integer(y)
-  if (is.factor(y))  y <- as.integer(as.character(y))
-  y <- as.integer(y)
-
-  if (any(!is.na(y) & !(y %in% c(0L, 1L)))) {
-    stop("`", label_col, "` must be 0/1 (or coercible to 0/1).")
-  }
-
-  if (require_both) {
-    if (sum(y == 1L, na.rm = TRUE) < 1L) stop("No positives found (", label_col, "==1).")
-    if (sum(y == 0L, na.rm = TRUE) < 1L) stop("No negatives found (", label_col, "==0).")
-  }
-
-  if (any(GenomicRanges::width(gr) != 1L)) {
-    warning("Some ranges have width != 1. Resizing to width=1 (fix='center').")
-    gr <- IRanges::resize(gr, width = 1L, fix = "center")
-  }
-
-  if (is.null(names(gr)) || anyDuplicated(names(gr))) {
-    names(gr) <- paste0("site_", seq_along(gr))
-  }
-
-  S4Vectors::mcols(gr)[[label_col]] <- y
-  gr
-}
-
-
-#' Internal helper
-#' @noRd
-.harmonize_seqlevels <- function(gr, txdb, seqstyle = NULL, chrs = NULL) {
-  if (!is.null(seqstyle)) {
-    GenomeInfoDb::seqlevelsStyle(gr) <- seqstyle
-    GenomeInfoDb::seqlevelsStyle(txdb) <- seqstyle
-  } else {
-    st <- GenomeInfoDb::seqlevelsStyle(txdb)
-    if (length(st) > 0L) {
-      suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- st[1], silent = TRUE))
-    }
-  }
-
-  if (is.null(chrs)) {
-    chrs <- intersect(seqlevels(gr), seqlevels(txdb))
-  }
-
-  gr   <- GenomeInfoDb::keepSeqlevels(gr, chrs, pruning.mode = "coarse")
-  txdb <- GenomeInfoDb::keepSeqlevels(txdb, chrs, pruning.mode = "coarse")
-
-  GenomeInfoDb::seqinfo(gr) <- GenomeInfoDb::seqinfo(txdb)[chrs]
-  gr <- trim(gr)
-
-  list(gr = gr, txdb = txdb, chrs = chrs)
-}
-
-#' Internal helper
-#' @noRd
-.first_or_na <- function(x) {
-  if (is(x, "List") || is.list(x)) {
-    return(vapply(x, function(z) if (length(z)) as.character(z[[1]]) else NA_character_, character(1)))
-  }
-  as.character(x)
-}
-
-# ----------------------------
-# Transcript metrics & resources
-# ----------------------------
-
-#' Compute transcript-level length metrics
-#'
-#' Computes transcript lengths and (optionally) intron counts/lengths from a \code{TxDb}.
-#' This is used internally by \code{\link{build_tx_resources}}, but can also be useful
-#' when you want the raw per-transcript metric table.
-#'
-#' @param txdb A \code{TxDb} object.
-#' @param include_introns Logical; if TRUE, compute intron counts and total intron length per transcript.
-#' @param introns_by_tx Optional \code{GRangesList} from \code{GenomicFeatures::intronsByTranscript(txdb)}.
-#'   Supplying this avoids recomputation.
-#'
-#' @returns A \code{data.frame} with one row per transcript (tx), including \code{tx_len},
-#'   \code{cds_len}, \code{utr5_len}, \code{utr3_len}, and optionally \code{intron_len}, \code{n_intron}.
-#'
-#' @seealso \code{\link{build_tx_resources}}
-#' @export
-compute_tx_metrics <- function(txdb, include_introns = TRUE, introns_by_tx = NULL) {
-  tl <- GenomicFeatures::transcriptLengths(
-    txdb,
-    with.cds_len  = TRUE,
-    with.utr5_len = TRUE,
-    with.utr3_len = TRUE
-  )
-  tl <- as.data.frame(tl, stringsAsFactors = FALSE)
-  tl$tx_id   <- as.character(tl$tx_id)
-  tl$tx_name <- as.character(tl$tx_name)
-
-  if (include_introns) {
-    if (is.null(introns_by_tx)) {
-      introns_by_tx <- GenomicFeatures::intronsByTranscript(txdb, use.names = TRUE)
-    }
-
-    n <- S4Vectors::elementNROWS(introns_by_tx)
-    intr_n <- n
-    names(intr_n) <- names(introns_by_tx)
-
-    intr_len <- numeric(length(n))
-    names(intr_len) <- names(introns_by_tx)
-
-    if (sum(n) > 0L) {
-      u <- unlist(introns_by_tx, use.names = FALSE)
-      grp <- rep.int(seq_along(n), n)
-
-      # grouped sum of widths; rownames are group indices
-      intr_sum <- rowsum(width(u), grp, reorder = FALSE)
-      intr_len[as.integer(rownames(intr_sum))] <- intr_sum[, 1]
-    }
-
-    tl$intron_len <- intr_len[match(tl$tx_name, names(intr_len))]
-    tl$n_intron   <- intr_n[match(tl$tx_name, names(intr_n))]
-  }
-
-  tl
-}
-
-#' Build transcript resources for fast site annotation
-#'
-#' Precomputes transcript-level metrics and transcript feature structures (CDS/UTR/introns)
-#' from a \code{TxDb}. The returned list can be passed to \code{\link{annotate_sites}}
-#' and reused across many GRanges objects to avoid repeated expensive extraction steps.
-#'
-#' @param txdb A \code{TxDb} object.
-#' @param include_introns Logical; if TRUE, include intron GRangesLists and intron metrics.
-#'
-#' @returns A named \code{list} containing transcript metrics and feature GRangesLists,
-#'   including \code{tx_metrics}, \code{cds_by_tx}, \code{five_by_tx}, \code{three_by_tx},
-#'   \code{introns_by_tx} (if requested), and length vectors (\code{cds_len}, \code{five_len},
-#'   \code{three_len}, \code{intr_len}) plus CDS anchor coordinates (\code{cds_start}, \code{cds_stop}).
-#'
-#' @examplesIf requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE)
-#' txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
-#' res <- build_tx_resources(txdb)
-#' names(res)
-#'
-#' @export
-build_tx_resources <- function(txdb, include_introns = TRUE) {
-  # Transcript strand map (names are transcript names when use.names=TRUE)
-  tx_gr <- GenomicFeatures::transcripts(txdb, use.names = TRUE)
-  tx_strand <- as.character(strand(tx_gr))
-  names(tx_strand) <- names(tx_gr)
-
-  # Feature GRangesLists (do NOT add segment_rank here; too costly globally)
-  cds_by_tx     <- GenomicFeatures::cdsBy(txdb, by = "tx", use.names = TRUE)
-  five_by_tx    <- GenomicFeatures::fiveUTRsByTranscript(txdb, use.names = TRUE)
-  three_by_tx   <- GenomicFeatures::threeUTRsByTranscript(txdb, use.names = TRUE)
-  introns_by_tx <- GenomicFeatures::intronsByTranscript(txdb, use.names = TRUE)
-
-  tx_metrics <- compute_tx_metrics(txdb, include_introns = include_introns, introns_by_tx = introns_by_tx)
-
-  # Named length vectors (fast; no vapply(sum(width(.))) over 112k elements)
-  cds_len   <- setNames(as.numeric(tx_metrics$cds_len),  tx_metrics$tx_name)
-  five_len  <- setNames(as.numeric(tx_metrics$utr5_len), tx_metrics$tx_name)
-  three_len <- setNames(as.numeric(tx_metrics$utr3_len), tx_metrics$tx_name)
-  intr_len  <- if ("intron_len" %in% names(tx_metrics)) {
-    setNames(as.numeric(tx_metrics$intron_len), tx_metrics$tx_name)
-  } else {
-    setNames(rep(NA_real_, nrow(tx_metrics)), tx_metrics$tx_name)
-  }
-
-  # CDS anchors per transcript without looping over 112k transcripts:
-  # Use first and last CDS segments in list order. For cdsBy(by="tx"), segments are
-  # ordered by ascending exon rank within transcript.
-  tx_names <- names(cds_by_tx)
-  cds_start <- setNames(rep(NA_integer_, length(tx_names)), tx_names)
-  cds_stop  <- setNames(rep(NA_integer_, length(tx_names)), tx_names)
-
-  n_cds <- S4Vectors::elementNROWS(cds_by_tx)
-  if (sum(n_cds) > 0L) {
-    u <- unlist(cds_by_tx, use.names = FALSE)
-    offsets <- c(0L, cumsum(n_cds))[seq_along(n_cds)]
-    first_idx <- offsets + 1L
-    last_idx  <- offsets + n_cds
-
-    ok <- n_cds > 0L
-    first_seg <- u[first_idx[ok]]
-    last_seg  <- u[last_idx[ok]]
-
-    st <- tx_strand[tx_names[ok]]
-    # fall back to segment strand if tx_strand missing
-    seg_st <- as.character(strand(first_seg))
-    st[is.na(st) | st == "*"] <- seg_st[is.na(st) | st == "*"]
-
-    plus  <- st != "-"
-    minus <- !plus
-
-    ok_names <- tx_names[ok]
-    cds_start[ok_names[plus]]  <- start(first_seg[plus])
-    cds_stop[ok_names[plus]]   <- end(last_seg[plus])
-
-    cds_start[ok_names[minus]] <- end(first_seg[minus])
-    cds_stop[ok_names[minus]]  <- start(last_seg[minus])
-  }
-
-  list(
-    tx_metrics    = tx_metrics,
-    tx_strand     = tx_strand,
-    cds_by_tx     = cds_by_tx,
-    five_by_tx    = five_by_tx,
-    three_by_tx   = three_by_tx,
-    introns_by_tx = introns_by_tx,
-    cds_len       = cds_len,
-    five_len      = five_len,
-    three_len     = three_len,
-    intr_len      = intr_len,
-    cds_start     = cds_start,
-    cds_stop      = cds_stop
-  )
-}
-
-# ----------------------------
-# Annotation of sites
-# ----------------------------
-
-# gr = testGR
-# txdb = TxDb.Hsapiens.UCSC.hg38.knownGene
-# label_col = "label"
-# tx_select = "longest"
-# seqstyle = NULL
-# chrs = NULL
-# resources = NULL
-# drop_unannotated = FALSE
-# orgdb = org.Hs.eg.db
-# gene_keytype = "ENTREZID"
-# gene_symbol_col = "SYMBOL"
-# gene_name_col = "GENENAME"
-#gene_keytype = NULL
-#gene_symbol_col = "SYMBOL"
-#gene_name_col = NULL
-# NEW: locateVariants cache
-#cache = NULL
-
-# ----------------------------
-# Location mapping helpers
-# ----------------------------
-
-#' Internal helper
-#' @noRd
-.location_priority <- function(loc) {
-  # Smaller = higher priority when ties occur (e.g. promoter + intergenic)
-  loc <- as.character(loc)
-  pri <- rep.int(99L, length(loc))
-  pri[loc == "coding"]     <- 1L
-  pri[loc == "fiveUTR"]    <- 2L
-  pri[loc == "threeUTR"]   <- 3L
-  pri[loc == "intron"]     <- 4L
-  pri[loc == "spliceSite"] <- 5L
-  pri[loc == "promoter"]   <- 6L
-  pri[loc == "intergenic"] <- 7L
-  pri[loc == "unannotated"] <- 100L
-  pri
-}
-
-#' Internal helper
-#' @noRd
-.map_location_to_feature <- function(location) {
-  # VariantAnnotation locations include: coding, fiveUTR, threeUTR, intron,
-  # intergenic, spliceSite, promoter. :contentReference[oaicite:5]{index=5}
-  loc <- as.character(location)
-  out <- rep.int("other", length(loc))
-
-  out[loc == "coding"]     <- "CDS"
-  out[loc == "fiveUTR"]    <- "5UTR"
-  out[loc == "threeUTR"]   <- "3UTR"
-  out[loc == "intron"]     <- "intron"
-  out[loc == "intergenic"] <- "intergenic"
-  out[loc == "spliceSite"] <- "spliceSite"
-  out[loc == "promoter"]   <- "promoter"
-  out[loc == "unannotated"] <- "unannotated"
-
-  out
-}
-
-# ----------------------------
-# Optional gene symbol mapping helper
-# ----------------------------
-
-#' Internal helper
-#' @noRd
-.add_gene_symbols <- function(gr,
-                              orgdb = NULL,
-                              gene_id_col = "gene_id",
-                              keytype = NULL,
-                              symbol_col = "SYMBOL",
-                              name_col = NULL,
-                              out_symbol_col = "gene_symbol",
-                              out_name_col = "gene_name") {
-  if (is.null(orgdb)) return(gr)
-
-  if (!requireNamespace("AnnotationDbi", quietly = TRUE)) {
-    stop("orgdb provided but package 'AnnotationDbi' is not installed/available.")
-  }
-
-  if (!(gene_id_col %in% colnames(mcols(gr)))) return(gr)
-
-  gids <- as.character(mcols(gr)[[gene_id_col]])
-  keys <- unique(gids)
-  keys <- keys[!is.na(keys) & nzchar(keys)]
-
-  # Initialize output columns
-  mcols(gr)[[out_symbol_col]] <- NA_character_
-  if (!is.null(name_col)) mcols(gr)[[out_name_col]] <- NA_character_
-
-  if (!length(keys)) return(gr)
-
-  if (is.null(keytype)) {
-    kts <- AnnotationDbi::keytypes(orgdb)
-    keytype <- if ("ENTREZID" %in% kts) "ENTREZID" else kts[1]
-  }
-
-  cols <- unique(c(symbol_col, if (!is.null(name_col)) name_col))
-  sel <- AnnotationDbi::select(orgdb, keys = keys, columns = cols, keytype = keytype)
-
-  # Guardrails: coerce key column to character
-  sel[[keytype]] <- as.character(sel[[keytype]])
-  sel <- sel[!is.na(sel[[keytype]]) & nzchar(sel[[keytype]]), , drop = FALSE]
-
-  # If multiple rows per key exist, keep the first non-NA per key
-  pick_first <- function(x) {
-    x <- as.character(x)
-    x <- x[!is.na(x) & nzchar(x)]
-    if (length(x)) x[1] else NA_character_
-  }
-
-  sym_map <- tapply(sel[[symbol_col]], sel[[keytype]], pick_first)
-  mcols(gr)[[out_symbol_col]] <- unname(sym_map[gids])
-
-  if (!is.null(name_col)) {
-    nm_map <- tapply(sel[[name_col]], sel[[keytype]], pick_first)
-    mcols(gr)[[out_name_col]] <- unname(nm_map[gids])
-  }
-
-  gr
-}
-
-# ----------------------------
-# Updated annotation function (your version + tweaks)
-# ----------------------------
-
-
-#' Annotate candidate sites with transcript context and region geometry
-#'
-#' Assigns each site to a transcript and region (e.g. fiveUTR/coding/threeUTR/intron),
-#' attaches transcript-level length metrics, computes within-feature coordinates (\code{feature_prop})
-#' and a concatenated metagene coordinate (\code{metagene_prop}), and optionally maps gene IDs
-#' to symbols/names via an \code{OrgDb}.
-#'
-#' This function does \strong{not} require a \code{label} column. If \code{label_col} exists,
-#' it may be lightly normalized (logical or "0/1" factor/character to integer), but labels
-#' are never validated here.
-#'
-#' @param gr A \code{GRanges} of single-nucleotide sites.
-#' @param txdb A \code{TxDb} object.
-#' @param label_col Optional name of a label column to preserve/normalize if present
-#'   (default \code{"label"}). Not required.
-#' @param tx_select Which transcript to select if multiple overlap a site.
-#'   \code{"longest"} prefers the transcript with the largest \code{tx_len}.
-#' @param seqstyle Optional seqlevel style (e.g. \code{"UCSC"}).
-#' @param chrs Optional character vector of chromosomes/seqlevels to keep.
-#' @param resources Optional output of \code{\link{build_tx_resources}} for reuse/caching.
-#' @param drop_unannotated Logical; if TRUE drop rows with \code{location == "unannotated"}.
-#' @param orgdb Optional \code{OrgDb} for gene ID mapping (e.g. \code{org.Hs.eg.db}).
-#' @param gene_keytype Keytype used by \code{orgdb} for \code{gene_id} (e.g. \code{"ENTREZID"}).
-#' @param gene_symbol_col Column to retrieve from \code{orgdb} for gene symbols (default \code{"SYMBOL"}).
-#' @param gene_name_col Optional column to retrieve for gene names/descriptions (e.g. \code{"GENENAME"}).
-#' @param cache Optional cache passed to \code{VariantAnnotation::locateVariants}.
-#'
-#' @returns A \code{GRanges} with added metadata including \code{location}, \code{feature},
-#'   \code{gene_id}, \code{tx_name}, transcript length metrics, feature geometry columns,
-#'   and (if requested) gene symbol/name columns.
-#'
-#' @seealso \code{\link{build_tx_resources}}, \code{\link{add_kmer}},
-#'   \code{\link{match_background}}, \code{\link{random_drach_within_transcript}}
-#'
-#' @examplesIf requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) && requireNamespace("GenomicRanges", quietly = TRUE)
-#' txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
-#' gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100000, 100000), strand = "+")
-#' ann <- annotate_sites(gr, txdb = txdb)
-#'
-#' @export
-annotate_sites <- function(gr,
-                           txdb,
-                           label_col = "label",
-                           tx_select = c("longest", "first"),
-                           seqstyle = NULL,
-                           chrs = NULL,
-                           resources = NULL,
-                           drop_unannotated = FALSE,
-                           orgdb = NULL,
-                           gene_keytype = NULL,
-                           gene_symbol_col = "SYMBOL",
-                           gene_name_col = NULL,
-                           cache = NULL) {
-  tx_select <- match.arg(tx_select)
-
-  # NOTE: no label requirement here
-  gr <- .validate_sites_gr(gr, label_col = label_col)
-
-  h <- .harmonize_seqlevels(gr, txdb, seqstyle = seqstyle, chrs = chrs)
-  gr <- h$gr; txdb <- h$txdb
-
-  if (is.null(resources)) {
-    resources <- build_tx_resources(txdb, include_introns = TRUE)
-  }
-  tx_metrics <- resources$tx_metrics
-
-  loc <- suppressWarnings(
-    VariantAnnotation::locateVariants(gr, txdb, VariantAnnotation::AllVariants(), cache = cache)
-  )
-  names(loc) <- NULL
-  loc_df <- as.data.frame(loc, stringsAsFactors = FALSE)
-
-  if (!("QUERYID" %in% colnames(loc_df))) stop("locateVariants output missing QUERYID; unexpected.")
-  if (!("LOCATION" %in% colnames(loc_df))) stop("locateVariants output missing LOCATION; unexpected.")
-
-  loc_df$LOCATION <- as.character(loc_df$LOCATION)
-
-  if ("TXID" %in% colnames(loc_df)) loc_df$TXID <- .first_or_na(loc_df$TXID) else loc_df$TXID <- NA_character_
-  if ("GENEID" %in% colnames(loc_df)) loc_df$GENEID <- .first_or_na(loc_df$GENEID) else loc_df$GENEID <- NA_character_
-
-  txid_to_name <- stats::setNames(as.character(tx_metrics$tx_name), as.character(tx_metrics$tx_id))
-  loc_df$tx_name <- txid_to_name[loc_df$TXID]
-
-  txname_to_len <- stats::setNames(tx_metrics$tx_len, tx_metrics$tx_name)
-  loc_df$tx_len <- txname_to_len[loc_df$tx_name]
-
-  loc_df$.loc_pri <- .location_priority(loc_df$LOCATION)
-
-  if (nrow(loc_df) > 0L) {
-    if (tx_select == "longest") {
-      ord <- order(loc_df$QUERYID, -loc_df$tx_len, loc_df$.loc_pri, loc_df$tx_name)
-    } else {
-      ord <- order(loc_df$QUERYID, loc_df$.loc_pri, loc_df$tx_name)
-    }
-    loc_df <- loc_df[ord, , drop = FALSE]
-    loc_sel <- loc_df[!duplicated(loc_df$QUERYID), , drop = FALSE]
-  } else {
-    loc_sel <- loc_df
-  }
-
-  ann <- S4Vectors::DataFrame(
-    location = rep(NA_character_, length(gr)),
-    feature  = rep(NA_character_, length(gr)),
-    gene_id  = rep(NA_character_, length(gr)),
-    tx_id    = rep(NA_character_, length(gr)),
-    tx_name  = rep(NA_character_, length(gr))
-  )
-
-  if (nrow(loc_sel) > 0L) {
-    m <- match(seq_along(gr), loc_sel$QUERYID)
-    ok <- !is.na(m)
-
-    ann$location[ok] <- loc_sel$LOCATION[m[ok]]
-    ann$gene_id[ok]  <- loc_sel$GENEID[m[ok]]
-    ann$tx_id[ok]    <- loc_sel$TXID[m[ok]]
-    ann$tx_name[ok]  <- loc_sel$tx_name[m[ok]]
-  }
-
-  ann$location[is.na(ann$location)] <- "unannotated"
-  ann$feature <- .map_location_to_feature(ann$location)
-
-  txm <- tx_metrics
-  keep_cols <- setdiff(colnames(txm), c("tx_id", "tx_name", "gene_id"))
-  tx_match <- match(ann$tx_name, txm$tx_name)
-
-  tx_attached <- S4Vectors::DataFrame()
-  for (cl in keep_cols) {
-    tx_attached[, cl] <- txm[[cl]][tx_match]
-  }
-
-  S4Vectors::mcols(gr) <- cbind(S4Vectors::mcols(gr), ann, tx_attached)
-
-  gr <- add_feature_geometry(gr, resources = resources)
-
-  gr <- .add_gene_symbols(
-    gr,
-    orgdb = orgdb,
-    gene_id_col = "gene_id",
-    keytype = gene_keytype,
-    symbol_col = gene_symbol_col,
-    name_col = gene_name_col,
-    out_symbol_col = "gene_symbol",
-    out_name_col = "gene_name"
-  )
-
-  if (drop_unannotated) {
-    gr <- gr[gr$location != "unannotated"]
-  }
-
-  gr
-}
-
-
-#' Compute within-feature geometry and metagene coordinates
-#'
-#' Adds feature-level geometry columns (e.g. \code{feature_len}, \code{feature_prop},
-#' \code{feature_width}, segment rank, distances to feature edges) and a concatenated
-#' metagene coordinate (\code{metagene_prop}) for fiveUTR/coding/threeUTR.
-#'
-#' @param gr A \code{GRanges} with at least \code{location} and \code{tx_name} in \code{mcols(gr)}.
-#' @param resources Output from \code{\link{build_tx_resources}}.
-#'
-#' @returns The input \code{GRanges} with additional geometry columns added.
-#'
-#' @seealso \code{\link{annotate_sites}}, \code{\link{build_tx_resources}}
-#' @export
-add_feature_geometry <- function(gr, resources) {
-  if (!("location" %in% colnames(mcols(gr)))) stop("`gr` must have a 'location' column (run annotate_sites first).")
-  if (!("tx_name" %in% colnames(mcols(gr))))  stop("`gr` must have a 'tx_name' column (run annotate_sites first).")
-
-  init_col <- function(gr, nm, val) {
-    if (!(nm %in% names(mcols(gr)))) {
-      mcols(gr)[[nm]] <- val
-    }
-    gr
-  }
-
-  gr <- init_col(gr, "feature_len",             rep(NA_real_,    length(gr)))
-  gr <- init_col(gr, "feature_prop",            rep(NA_real_,    length(gr)))
-  gr <- init_col(gr, "metagene_prop",           rep(NA_real_,    length(gr)))
-  gr <- init_col(gr, "feature_width",           rep(NA_integer_, length(gr)))
-  gr <- init_col(gr, "segment_rank",            rep(NA_integer_, length(gr)))
-  gr <- init_col(gr, "dist_from_feature_start", rep(NA_integer_, length(gr)))
-  gr <- init_col(gr, "dist_from_feature_end",   rep(NA_integer_, length(gr)))
-  gr <- init_col(gr, "start_dist",              rep(NA_integer_, length(gr)))
-  gr <- init_col(gr, "stop_dist",               rep(NA_integer_, length(gr)))
-
-
-  .fill_one <- function(gr, idx, grl, flen_vec) {
-    if (length(idx) == 0L) return(gr)
-
-    sites <- gr[idx]
-    txs <- unique(as.character(sites$tx_name))
-    txs <- txs[!is.na(txs) & nzchar(txs)]
-    if (!length(txs)) return(gr)
-
-    txs2 <- intersect(txs, names(grl))
-    if (!length(txs2)) return(gr)
-
-    grl_sub <- grl[txs2]
-    if (!length(grl_sub)) return(gr)
-
-    # Total feature length for each site's transcript
-    gr$feature_len[idx] <- flen_vec[as.character(sites$tx_name)]
-
-    feat_gr <- unlist(grl_sub, use.names = FALSE)
-    nseg <- S4Vectors::elementNROWS(grl_sub)
-    feat_gr$tx_name <- rep(names(grl_sub), nseg)
-
-    if ("exon_rank" %in% colnames(mcols(feat_gr))) {
-      feat_gr$segment_rank <- as.integer(feat_gr$exon_rank)
-    } else {
-      feat_gr$segment_rank <- sequence(nseg)
-    }
-
-    hits <- GenomicRanges::findOverlaps(sites, feat_gr, ignore.strand = FALSE)
-    if (length(hits) > 0L) {
-      qh <- queryHits(hits)
-      sh <- subjectHits(hits)
-
-      keep <- as.character(sites$tx_name[qh]) == as.character(feat_gr$tx_name[sh])
-      qh <- qh[keep]; sh <- sh[keep]
-
-      if (length(qh) > 0L) {
-        o <- order(qh)
-        qh <- qh[o]; sh <- sh[o]
-        keep_first <- !duplicated(qh)
-        qh <- qh[keep_first]; sh <- sh[keep_first]
-
-        seg <- feat_gr[sh]
-        site_sub_idx <- idx[qh]
-
-        gr$feature_width[site_sub_idx] <- width(seg)
-        gr$segment_rank[site_sub_idx]  <- seg$segment_rank
-
-        pos <- start(gr[site_sub_idx])
-        seg_start <- start(seg)
-        seg_end   <- end(seg)
-        st <- as.character(strand(gr[site_sub_idx]))
-
-        plus <- st != "-"
-        dist_start <- integer(length(pos))
-        dist_end   <- integer(length(pos))
-
-        dist_start[plus] <- pmax(0L, pos[plus] - seg_start[plus])
-        dist_end[plus]   <- pmax(0L, seg_end[plus] - pos[plus])
-
-        minus <- !plus
-        dist_start[minus] <- pmax(0L, seg_end[minus] - pos[minus])
-        dist_end[minus]   <- pmax(0L, pos[minus] - seg_start[minus])
-
-        gr$dist_from_feature_start[site_sub_idx] <- dist_start
-        gr$dist_from_feature_end[site_sub_idx]   <- dist_end
-      }
-    }
-
-    mapped <- suppressWarnings(
-      GenomicFeatures::mapToTranscripts(sites, transcripts = grl_sub, ignore.strand = FALSE)
-    )
-    if (length(mapped) > 0L) {
-      mapped_tx <- as.character(seqnames(mapped))
-      fl <- flen_vec[mapped_tx]
-      prop <- start(mapped) / fl
-
-      ok <- is.finite(prop) & prop >= 0 & prop <= 1
-      prop[!ok] <- NA_real_
-
-      prop_by_hit <- tapply(prop, mapped$xHits, function(z) mean(z, na.rm = TRUE))
-      hit_idx <- as.integer(names(prop_by_hit))
-      gr$feature_prop[idx[hit_idx]] <- as.numeric(prop_by_hit)
-    }
-
-    gr
-  }
-
-
-  # Fill in geometry for core regions
-  gr <- .fill_one(gr, which(gr$location == "fiveUTR"),  resources$five_by_tx,     resources$five_len)
-  gr <- .fill_one(gr, which(gr$location == "coding"),   resources$cds_by_tx,      resources$cds_len)
-  gr <- .fill_one(gr, which(gr$location == "threeUTR"), resources$three_by_tx,    resources$three_len)
-  gr <- .fill_one(gr, which(gr$location == "intron"),   resources$introns_by_tx,  resources$intr_len)
-
-  # Metagene coordinate (useful for classic 5UTR/CDS/3UTR plots)
-  i5 <- which(gr$location == "fiveUTR"  & is.finite(gr$feature_prop))
-  ic <- which(gr$location == "coding"   & is.finite(gr$feature_prop))
-  i3 <- which(gr$location == "threeUTR" & is.finite(gr$feature_prop))
-
-  gr$metagene_prop[i5] <- gr$feature_prop[i5]
-  gr$metagene_prop[ic] <- gr$feature_prop[ic] + 1
-  gr$metagene_prop[i3] <- gr$feature_prop[i3] + 2
-
-  # Distances to CDS anchors in genomic space (NA for noncoding transcripts)
-  tx <- as.character(gr$tx_name)
-  gr$start_dist <- abs(start(gr) - resources$cds_start[tx])
-  gr$stop_dist  <- abs(start(gr) - resources$cds_stop[tx])
-
-  gr
-}
-
-
-#' Add sequence k-mer context around each site
-#'
-#' Extracts a centered k-mer from a reference genome and stores it as a metadata column.
-#' Typically used prior to strict k-mer background matching.
-#'
-#' @param gr A \code{GRanges} of single-nucleotide sites.
-#' @param genome A BSgenome object (or other supported genome object for \code{Biostrings::getSeq}).
-#' @param k Integer k-mer length (default 5).
-#' @param out_col Name of the metadata column to write (default \code{"kmer"}).
-#' @param seqstyle Optional seqlevel style (e.g. \code{"UCSC"}).
-#' @param chrs Optional character vector of seqlevels to keep.
-#'
-#' @returns The input \code{GRanges} with \code{out_col} added to \code{mcols(gr)}.
-#' @export
-add_kmer <- function(gr, genome, k = 5L, out_col = "kmer", seqstyle = NULL, chrs = NULL) {
-  if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
-  if (k < 1L) stop("`k` must be >= 1.")
-  if ((k %% 2L) == 0L) warning("Even k: window won't be perfectly symmetric around the center base.")
-
-  if (!is.null(seqstyle)) {
-    GenomeInfoDb::seqlevelsStyle(gr) <- seqstyle
-    GenomeInfoDb::seqlevelsStyle(genome) <- seqstyle
-  } else {
-    st <- GenomeInfoDb::seqlevelsStyle(genome)
-    if (length(st) > 0L) suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- st[1], silent = TRUE))
-  }
-
-  if (is.null(chrs)) chrs <- intersect(seqlevels(gr), seqlevels(genome))
-  gr <- GenomeInfoDb::keepSeqlevels(gr, chrs, pruning.mode = "coarse")
-
-  GenomeInfoDb::seqinfo(gr) <- GenomeInfoDb::seqinfo(genome)[chrs]
-
-  win <- IRanges::resize(gr, width = k, fix = "center")
-  win <- trim(win)
-
-  mcols(gr)[[out_col]] <- as.character(Biostrings::getSeq(genome, win))
-  gr
-}
-
-
-# ----------------------------
-# Updated matcher
-
 #' Match positives to unique negatives using metagene position and optional bin constraints
 #'
 #' Creates a background set by pairing each positive site to a unique negative site within
@@ -756,6 +16,10 @@ add_kmer <- function(gr, genome, k = 5L, out_col = "kmer", seqstyle = NULL, chrs
 #' The function writes standard output columns used by downstream plotting helpers:
 #' \code{matched_negative_id}, \code{matched_positive_id}, \code{is_matched_negative},
 #' \code{is_positive}, \code{meta_delta}, and \code{match_set}.
+#'
+#' NEW (split-aware): If \code{split_col} is provided, positives are only matched to negatives
+#' with the same split label. You can also restrict matching to specific splits via
+#' \code{match_splits} (e.g. only "training").
 #'
 #' @param gr A \code{GRanges} containing labels and required annotation columns.
 #' @param label_col Metadata label column (0/1).
@@ -777,42 +41,55 @@ add_kmer <- function(gr, genome, k = 5L, out_col = "kmer", seqstyle = NULL, chrs
 #' @param log_bin_cols Columns log1p-transformed prior to binning.
 #' @param seed Random seed (affects tie-breaking order only).
 #'
+#' @param split_col Optional column in \code{mcols(gr)} defining data splits (e.g. "dataset_split").
+#'   If provided, matching is enforced strictly within split.
+#' @param match_splits Optional character vector of split labels to actively match within.
+#'   If provided, only rows in those splits are eligible to be matched. Other splits are left
+#'   untouched (their match columns remain NA/other).
+#' @param drop_na_split If TRUE (default), rows with NA/"" split are ineligible when split_col is used.
+#'
 #' @returns A \code{GRanges} with standard match columns added.
 #'
 #' @seealso \code{\link{subset_matched_pairs}}, \code{\link{plot_metagene_density}}
 #' @export
 match_background <- function(gr,
-                                    label_col = "label",
-                                    location_col = "location",
-                                    locations = c("fiveUTR","coding","threeUTR"),
-                                    return_diagnostics = FALSE,
+                             label_col = "label",
+                             location_col = "location",
+                             locations = c("fiveUTR","coding","threeUTR"),
+                             return_diagnostics = FALSE,
 
-                                    # 2) optional kmer matching
-                                    kmer_match = FALSE,
-                                    kmer_col = "kmer",
+                             # 2) optional kmer matching
+                             kmer_match = FALSE,
+                             kmer_col = "kmer",
 
-                                    # 3) metagene closeness (primary)
-                                    meta_col = "metagene_prop",
-                                    meta_tol = 0.05,              # metagene units (0..3); within a region this is ~within-feature tolerance
-                                    enforce_meta_tol = FALSE,     # if TRUE: leave unmatched if no neg within tol
-                                    meta_k = 200L,                # local candidate window size around each positive in meta-sorted negatives
+                             # 3) metagene closeness (primary)
+                             meta_col = "metagene_prop",
+                             meta_tol = 0.05,
+                             enforce_meta_tol = FALSE,
+                             meta_k = 200L,
 
-                                    # 4) optional "match level bins" (secondary)
-                                    bin_match = TRUE,
-                                    bin_cols = c("feature_width","segment_rank","nexon","tx_len",
-                                                 "dist_from_feature_start","dist_from_feature_end"),
-                                    n_bins = 5L,
-                                    bin_within = c("location","global"),
-                                    bin_mode = c("soft","hard"),
-                                    bin_weight = 0.25,            # penalty weight relative to meta closeness (keep small)
-                                    log_bin_cols = c("tx_len","feature_width","dist_from_feature_start","dist_from_feature_end"),
+                             # 4) optional "match level bins" (secondary)
+                             bin_match = TRUE,
+                             bin_cols = c("feature_width","segment_rank","nexon","tx_len",
+                                          "dist_from_feature_start","dist_from_feature_end"),
+                             n_bins = 5L,
+                             bin_within = c("location","global"),
+                             bin_mode = c("soft","hard"),
+                             bin_weight = 0.25,
+                             log_bin_cols = c("tx_len","feature_width","dist_from_feature_start","dist_from_feature_end"),
 
-                                    seed = 1L) {
+                             seed = 1L,
+
+                             # NEW: split-aware matching
+                             split_col = NULL,
+                             match_splits = NULL,
+                             drop_na_split = TRUE) {
+
   stopifnot(inherits(gr, "GRanges"))
-  if (!(label_col %in% colnames(mcols(gr)))) stop("Missing label_col: ", label_col)
-  if (!(location_col %in% colnames(mcols(gr)))) stop("Missing location_col: ", location_col)
-  if (!(meta_col %in% colnames(mcols(gr)))) stop("Missing meta_col: ", meta_col)
-  if (kmer_match && !(kmer_col %in% colnames(mcols(gr)))) stop("kmer_match=TRUE but missing kmer_col: ", kmer_col)
+  if (!(label_col %in% colnames(S4Vectors::mcols(gr)))) stop("Missing label_col: ", label_col)
+  if (!(location_col %in% colnames(S4Vectors::mcols(gr)))) stop("Missing location_col: ", location_col)
+  if (!(meta_col %in% colnames(S4Vectors::mcols(gr)))) stop("Missing meta_col: ", meta_col)
+  if (kmer_match && !(kmer_col %in% colnames(S4Vectors::mcols(gr)))) stop("kmer_match=TRUE but missing kmer_col: ", kmer_col)
 
   bin_within <- match.arg(bin_within)
   bin_mode <- match.arg(bin_mode)
@@ -822,43 +99,78 @@ match_background <- function(gr,
     names(gr) <- paste0("site_", seq_along(gr))
   }
 
-  y <- mcols(gr)[[label_col]]
+  mc <- S4Vectors::mcols(gr)
+
+  y <- mc[[label_col]]
   if (is.logical(y)) y <- as.integer(y)
   if (is.factor(y))  y <- as.integer(as.character(y))
   y <- as.integer(y)
 
-  loc <- as.character(mcols(gr)[[location_col]])
-  meta <- suppressWarnings(as.numeric(mcols(gr)[[meta_col]]))
+  loc  <- as.character(mc[[location_col]])
+  meta <- suppressWarnings(as.numeric(mc[[meta_col]]))
+
+  # ---- NEW: split-aware eligibility ----
+  split_vec <- rep(NA_character_, length(gr))
+  split_ok  <- rep(TRUE, length(gr))
+
+  if (!is.null(split_col)) {
+    if (!(split_col %in% colnames(mc))) {
+      stop("split_col='", split_col, "' not found in mcols(gr).")
+    }
+    split_vec <- as.character(mc[[split_col]])
+
+    if (isTRUE(drop_na_split)) {
+      split_ok <- !is.na(split_vec) & nzchar(split_vec)
+    } else {
+      split_vec[is.na(split_vec) | !nzchar(split_vec)] <- "__unsplit__"
+      split_ok <- rep(TRUE, length(split_vec))
+    }
+
+    if (!is.null(match_splits)) {
+      match_splits <- as.character(match_splits)
+      split_ok <- split_ok & (split_vec %in% match_splits)
+    }
+  }
 
   # One-hot location columns (useful for modeling later)
-  mcols(gr)$loc_fiveUTR  <- as.integer(loc == "fiveUTR")
-  mcols(gr)$loc_coding   <- as.integer(loc == "coding")
-  mcols(gr)$loc_threeUTR <- as.integer(loc == "threeUTR")
+  mc$loc_fiveUTR  <- as.integer(loc == "fiveUTR")
+  mc$loc_coding   <- as.integer(loc == "coding")
+  mc$loc_threeUTR <- as.integer(loc == "threeUTR")
 
   # In-scope sites (only these locations can be matched)
-  in_scope <- !is.na(loc) & loc %in% locations
+  in_scope <- !is.na(loc) & loc %in% locations & is.finite(meta) & split_ok
 
-  pos_idx <- which(y == 1L & in_scope & is.finite(meta))
-  neg_idx <- which(y == 0L & in_scope & is.finite(meta))
+  pos_idx <- which(y == 1L & in_scope)
+  neg_idx <- which(y == 0L & in_scope)
 
   # If kmer matching is on, require non-missing kmers
   if (kmer_match) {
-    km <- as.character(mcols(gr)[[kmer_col]])
+    km <- as.character(mc[[kmer_col]])
     pos_idx <- pos_idx[!is.na(km[pos_idx]) & nzchar(km[pos_idx])]
     neg_idx <- neg_idx[!is.na(km[neg_idx]) & nzchar(km[neg_idx])]
   }
 
   # Edge case
   if (!length(pos_idx) || !length(neg_idx)) {
-    mcols(gr)$is_positive <- as.integer(y == 1L)
-    mcols(gr)$is_matched_negative <- 0L
-    mcols(gr)$match_set <- ifelse(mcols(gr)$is_positive == 1L, "positive", "other")
-    attr(gr, "match_diagnostics") <- list(
-      n_pos_in_scope = length(pos_idx),
-      n_neg_in_scope = length(neg_idx),
-      n_matched = 0L,
-      reason = "No eligible positives or negatives in scope after filtering."
-    )
+    mc$is_positive <- as.integer(y == 1L)
+    mc$is_matched_negative <- 0L
+    mc$matched_negative_id <- rep(NA_character_, length(gr))
+    mc$matched_positive_id <- rep(NA_character_, length(gr))
+    mc$meta_delta <- rep(NA_real_, length(gr))
+    mc$match_set <- ifelse(mc$is_positive == 1L, "positive", "other")
+    S4Vectors::mcols(gr) <- mc
+
+    if (return_diagnostics) {
+      attr(gr, "match_diagnostics") <- list(
+        n_pos_in_scope = length(pos_idx),
+        n_neg_in_scope = length(neg_idx),
+        n_matched = 0L,
+        split_col = split_col,
+        match_splits = match_splits,
+        drop_na_split = drop_na_split,
+        reason = "No eligible positives or negatives in scope after filtering."
+      )
+    }
     return(gr)
   }
 
@@ -876,7 +188,6 @@ match_background <- function(gr,
       out[ok] <- 1L
       return(out)
     }
-    # Ensure cut() covers all values
     br[1] <- -Inf
     br[length(br)] <- Inf
     out[ok] <- as.integer(cut(x[ok], breaks = br, include.lowest = TRUE, right = TRUE, labels = FALSE))
@@ -886,17 +197,15 @@ match_background <- function(gr,
   # ---- build bin matrix (optional) ----
   bin_mat <- NULL
   if (bin_match) {
-    cols_ok <- intersect(bin_cols, colnames(mcols(gr)))
+    cols_ok <- intersect(bin_cols, colnames(mc))
     if (!length(cols_ok)) stop("bin_match=TRUE but none of bin_cols exist in mcols(gr).")
 
-    # Copy numeric vectors, optionally log1p-transform selected ones
     get_feat <- function(col) {
-      v <- suppressWarnings(as.numeric(mcols(gr)[[col]]))
+      v <- suppressWarnings(as.numeric(mc[[col]]))
       if (col %in% log_bin_cols) v <- log1p(pmax(v, 0))
       v
     }
 
-    # Compute bins either globally or within each location
     bin_mat <- matrix(NA_integer_, nrow = length(gr), ncol = length(cols_ok))
     colnames(bin_mat) <- cols_ok
 
@@ -905,9 +214,8 @@ match_background <- function(gr,
         bin_mat[, j] <- quantile_bin(get_feat(cols_ok[j]), n_bins = n_bins)
       }
     } else {
-      # within location to keep bins interpretable per region
       for (lv in locations) {
-        idx_lv <- which(loc == lv & in_scope)
+        idx_lv <- which((loc == lv) & (!is.na(loc)) & (loc %in% locations) & split_ok)
         if (!length(idx_lv)) next
         for (j in seq_along(cols_ok)) {
           v <- get_feat(cols_ok[j])
@@ -918,18 +226,22 @@ match_background <- function(gr,
       }
     }
 
-    # Store bins as columns (useful for debugging / modeling)
     for (j in seq_along(cols_ok)) {
-      mcols(gr)[[paste0("bin_", cols_ok[j])]] <- bin_mat[, j]
+      mc[[paste0("bin_", cols_ok[j])]] <- bin_mat[, j]
     }
   }
 
   # ---- hard constraints => group keys ----
   if (kmer_match) {
-    km <- as.character(mcols(gr)[[kmer_col]])
+    km <- as.character(mc[[kmer_col]])
     key <- paste0(loc, "||", km)
   } else {
     key <- loc
+  }
+
+  # NEW: enforce split boundary as a hard constraint
+  if (!is.null(split_col)) {
+    key <- paste0(split_vec, "||", key)
   }
 
   # Only consider keys relevant to our filtered idx
@@ -940,9 +252,9 @@ match_background <- function(gr,
 
   # Track unused negatives globally
   neg_used <- rep(FALSE, length(gr))
-  matched_neg_for_pos <- rep(NA_character_, length(gr))  # store negative name for each positive
-  matched_pos_for_neg <- rep(NA_character_, length(gr))  # store positive name for each negative
-  match_meta_delta <- rep(NA_real_, length(gr))          # abs(meta_pos - meta_neg) for positives
+  matched_neg_for_pos <- rep(NA_character_, length(gr))  # negative id for each positive
+  matched_pos_for_neg <- rep(NA_character_, length(gr))  # positive id for each negative
+  match_meta_delta <- rep(NA_real_, length(gr))
 
   set.seed(seed)
 
@@ -952,27 +264,20 @@ match_background <- function(gr,
     N <- neg_by_key[[kkey]]
     if (!length(P) || !length(N)) next
 
-    # Sort positives by meta to preserve global metagene structure
     P <- P[order(meta[P])]
-
-    # Sort negatives by meta; we will do local window searches in this order
     N_sorted <- N[order(meta[N])]
     N_meta <- meta[N_sorted]
 
     for (pi in P) {
-      # Skip if already matched (shouldn't happen, but safe)
       if (!is.na(matched_neg_for_pos[pi])) next
 
-      # Available negatives
       avail_mask <- !neg_used[N_sorted]
       if (!any(avail_mask)) break
 
-      # Locate position in sorted negative meta
       x <- meta[pi]
       j <- findInterval(x, N_meta)
       j <- max(1L, min(j, length(N_sorted)))
 
-      # Start with a local window around j
       win <- as.integer(meta_k)
       if (win < 10L) win <- 10L
 
@@ -986,7 +291,6 @@ match_background <- function(gr,
         cand <- cand[!neg_used[cand]]
 
         if (length(cand)) {
-          # Optionally enforce meta tolerance
           md <- abs(meta[cand] - x)
           if (!is.null(meta_tol) && is.finite(meta_tol) && meta_tol > 0) {
             in_tol <- which(md <= meta_tol)
@@ -999,11 +303,9 @@ match_background <- function(gr,
           }
 
           if (length(cand)) {
-            # Primary cost: meta closeness (scaled so meta_tol ~ 1 unit cost)
             meta_scale <- if (!is.null(meta_tol) && is.finite(meta_tol) && meta_tol > 0) meta_tol else 0.05
             cost_meta <- md / meta_scale
 
-            # Secondary cost: bins (either hard constraint or soft penalty)
             if (bin_match) {
               bp <- bin_mat[pi, , drop = TRUE]
               bn <- bin_mat[cand, , drop = FALSE]
@@ -1018,8 +320,6 @@ match_background <- function(gr,
                 md2 <- md[ok]
 
                 if (!length(cand2)) {
-                  # If hard bins eliminate all candidates, either expand window or give up
-                  # (This is exactly the situation that can destroy metagene matching in strict mode)
                   cand <- integer(0)
                 } else {
                   cand <- cand2
@@ -1030,11 +330,9 @@ match_background <- function(gr,
               }
 
               if (length(cand)) {
-                # soft bin distance in [0,1] roughly: mean(|bin_diff|/(n_bins-1))
                 denom <- max(1, n_bins - 1L)
                 bin_diff <- abs(sweep(bn, 2, bp, "-"))
                 cost_bin <- rowMeans(bin_diff / denom, na.rm = TRUE)
-
                 cost <- cost_meta + bin_weight * cost_bin
               } else {
                 cost <- numeric(0)
@@ -1044,14 +342,13 @@ match_background <- function(gr,
             }
 
             if (length(cand)) {
-              o <- order(cost, md)  # tie-break by pure meta closeness
+              o <- order(cost, md)
               chosen <- cand[o[1]]
               break
             }
           }
         }
 
-        # No candidate found: expand window
         if (win >= length(N_sorted)) break
         win <- min(length(N_sorted), win * 2L)
       }
@@ -1066,22 +363,25 @@ match_background <- function(gr,
   }
 
   # ---- attach result columns ----
-  mcols(gr)$is_positive <- as.integer(y == 1L)
-  mcols(gr)$matched_negative_id <- matched_neg_for_pos
-  mcols(gr)$matched_positive_id <- matched_pos_for_neg
-  mcols(gr)$meta_delta <- match_meta_delta
+  mc$is_positive <- as.integer(y == 1L)
+  mc$matched_negative_id <- matched_neg_for_pos
+  mc$matched_positive_id <- matched_pos_for_neg
+  mc$meta_delta <- match_meta_delta
 
   matched_neg_idx <- which(!is.na(matched_pos_for_neg))
-  mcols(gr)$is_matched_negative <- as.integer(seq_along(gr) %in% matched_neg_idx)
+  mc$is_matched_negative <- as.integer(seq_along(gr) %in% matched_neg_idx)
 
-  mcols(gr)$match_set <- ifelse(mcols(gr)$is_positive == 1L, "positive",
-                                ifelse(mcols(gr)$is_matched_negative == 1L, "matched_negative", "other"))
+  mc$match_set <- ifelse(mc$is_positive == 1L, "positive",
+                         ifelse(mc$is_matched_negative == 1L, "matched_negative", "other"))
+
+  S4Vectors::mcols(gr) <- mc
 
   if (return_diagnostics) {
     n_pos_scope <- length(which(y == 1L & in_scope))
     n_pos_eligible <- length(pos_idx)
     n_matched <- sum(!is.na(matched_neg_for_pos[pos_idx]))
-    diag <- list(
+
+    attr(gr, "match_diagnostics") <- list(
       n_pos_in_scope = n_pos_scope,
       n_pos_eligible = n_pos_eligible,
       n_neg_eligible = length(neg_idx),
@@ -1093,44 +393,25 @@ match_background <- function(gr,
       bin_weight = bin_weight,
       meta_tol = meta_tol,
       enforce_meta_tol = enforce_meta_tol,
-      meta_k = as.integer(meta_k)
+      meta_k = as.integer(meta_k),
+      split_col = split_col,
+      match_splits = match_splits,
+      drop_na_split = drop_na_split
     )
-    attr(gr, "match_diagnostics") <- diag
   }
 
   gr
 }
 
-
 #' Sample a random DRACH background site within the same transcript
 #'
 #' For each positive site, attempts to select a unique negative DRACH site from the same
-#' transcript, optionally matching location and/or exact k-mer. This yields a transcript-local
-#' background set that can be compared to \code{\link{match_background}}.
+#' transcript, optionally matching location and/or exact k-mer.
 #'
-#' Optionally writes the same standard match columns produced by \code{\link{match_background}}
-#' so downstream plotting functions work without modification.
+#' NEW (split-aware): If \code{split_col} is provided, positives are only matched to negatives
+#' with the same split label. You can also restrict matching to specific splits via
+#' \code{match_splits} (e.g. only "training").
 #'
-#' @param gr A \code{GRanges} containing annotation columns from \code{\link{annotate_sites}}
-#'   and sequence context from \code{\link{add_kmer}}.
-#' @param label_col Metadata label column (0/1).
-#' @param tx_col Transcript identifier column (default \code{"tx_name"}).
-#' @param location_col Region column (default \code{"location"}).
-#' @param locations Allowed regions for matching.
-#' @param kmer_col Column containing k-mers (default \code{"kmer"}).
-#' @param match_location If TRUE require the negative to be in the same region as the positive.
-#' @param match_kmer If TRUE require exact k-mer match.
-#' @param meta_col Optional metagene coordinate column used to compute \code{meta_delta}.
-#' @param seed Random seed controlling sampling within transcript strata.
-#' @param prefix Prefix for function-specific output columns.
-#' @param write_standard_cols If TRUE write canonical columns used by plotting helpers.
-#' @param overwrite_standard_cols If FALSE, do not overwrite canonical columns if they already exist.
-#' @param assert_invariants If TRUE perform internal consistency checks.
-#' @param return_diagnostics If TRUE attach a \code{<prefix>_diagnostics} attribute.
-#'
-#' @returns A \code{GRanges} with prefix match columns (and optionally canonical match columns).
-#'
-#' @seealso \code{\link{match_background}}, \code{\link{subset_matched_pairs}}
 #' @export
 random_drach_within_transcript <- function(gr,
                                            label_col = "label",
@@ -1143,11 +424,14 @@ random_drach_within_transcript <- function(gr,
                                            meta_col = "metagene_prop",
                                            seed = 1L,
                                            prefix = "txrand",
-                                           # NEW: write standard columns used by plot_* and match_background_simple()
                                            write_standard_cols = TRUE,
                                            overwrite_standard_cols = TRUE,
                                            assert_invariants = TRUE,
-                                           return_diagnostics = TRUE) {
+                                           return_diagnostics = TRUE,
+                                           # NEW: split-aware matching
+                                           split_col = NULL,
+                                           match_splits = NULL,
+                                           drop_na_split = TRUE) {
   stopifnot(inherits(gr, "GRanges"))
 
   mc <- S4Vectors::mcols(gr)
@@ -1178,6 +462,29 @@ random_drach_within_transcript <- function(gr,
   km  <- toupper(as.character(mc[[kmer_col]]))
   km  <- chartr("U", "T", km)
 
+  # ---- NEW: split-aware eligibility ----
+  split_vec <- rep(NA_character_, n)
+  split_ok  <- rep(TRUE, n)
+
+  if (!is.null(split_col)) {
+    if (!(split_col %in% colnames(mc))) {
+      stop("split_col='", split_col, "' not found in mcols(gr).")
+    }
+    split_vec <- as.character(mc[[split_col]])
+
+    if (isTRUE(drop_na_split)) {
+      split_ok <- !is.na(split_vec) & nzchar(split_vec)
+    } else {
+      split_vec[is.na(split_vec) | !nzchar(split_vec)] <- "__unsplit__"
+      split_ok <- rep(TRUE, length(split_vec))
+    }
+
+    if (!is.null(match_splits)) {
+      match_splits <- as.character(match_splits)
+      split_ok <- split_ok & (split_vec %in% match_splits)
+    }
+  }
+
   # DRACH in DNA alphabet: D=[AGT], R=[AG], A, C, H=[ACT]
   is_drach_5mer <- function(x) {
     x <- toupper(as.character(x))
@@ -1188,10 +495,11 @@ random_drach_within_transcript <- function(gr,
     out
   }
 
-  # In-scope rows must have tx/loc/kmer
+  # In-scope rows must have tx/loc/kmer (+ split_ok if split_col used)
   in_scope <- !is.na(tx) & nzchar(tx) &
     !is.na(loc) & nzchar(loc) &
-    !is.na(km) & nzchar(km)
+    !is.na(km) & nzchar(km) &
+    split_ok
 
   if (!is.null(locations)) in_scope <- in_scope & (loc %in% locations)
 
@@ -1216,7 +524,6 @@ random_drach_within_transcript <- function(gr,
   neg_id <- rep(NA_character_, n)
   pos_id <- rep(NA_character_, n)
   isneg  <- rep.int(0L, n)
-  # IMPORTANT: align values with plot functions + match_background_simple
   setv   <- ifelse(y == 1L, "positive", "other")
   meta_delta <- rep(NA_real_, n)
 
@@ -1234,7 +541,6 @@ random_drach_within_transcript <- function(gr,
     if (!is.null(meta)) mc[[dmeta_col]] <- meta_delta
     S4Vectors::mcols(gr) <- mc
 
-    # Optionally also write canonical columns so plotting works anyway
     if (write_standard_cols) {
       gr <- .txrand_write_standard_cols(
         gr,
@@ -1253,6 +559,9 @@ random_drach_within_transcript <- function(gr,
         n_neg_total = sum(y == 0L, na.rm = TRUE),
         n_pos_in_scope = length(pos_all),
         n_neg_drach_in_scope = length(neg_all),
+        split_col = split_col,
+        match_splits = match_splits,
+        drop_na_split = drop_na_split,
         n_pairs = 0L,
         reason = "No eligible positives or no eligible DRACH negatives in scope."
       )
@@ -1263,8 +572,9 @@ random_drach_within_transcript <- function(gr,
   # Matching key builder
   make_key <- function(idx) {
     k <- tx[idx]
-    if (match_location) k <- paste0(k, "||", loc[idx])
-    if (match_kmer)     k <- paste0(k, "||", km[idx])
+    if (!is.null(split_col)) k <- paste0(split_vec[idx], "||", k)  # NEW: split hard constraint
+    if (match_location)      k <- paste0(k, "||", loc[idx])
+    if (match_kmer)          k <- paste0(k, "||", km[idx])
     k
   }
 
@@ -1303,6 +613,9 @@ random_drach_within_transcript <- function(gr,
         n_neg_total = sum(y == 0L, na.rm = TRUE),
         n_pos_in_scope = length(pos_all),
         n_neg_drach_in_scope = length(neg_all),
+        split_col = split_col,
+        match_splits = match_splits,
+        drop_na_split = drop_na_split,
         n_pairs = 0L,
         reason = "No overlap of matching keys between positives and DRACH negatives."
       )
@@ -1310,7 +623,7 @@ random_drach_within_transcript <- function(gr,
     return(gr)
   }
 
-  # Sort by key and walk runs (memory-friendly)
+  # Sort by key and walk runs
   op <- order(key_pos)
   on <- order(key_neg)
   pos_s <- pos[op]; key_pos_s <- key_pos[op]
@@ -1338,21 +651,16 @@ random_drach_within_transcript <- function(gr,
       N <- neg_s[n_start[j]:n_end[j]]
 
       if (length(P) && length(N)) {
-        # match as many as possible (1:1, no replacement)
         m <- min(length(P), length(N))
         if (m > 0L) {
-          # SAFE sampling: sample positions, not index values
           Ppick <- P[sample.int(length(P), m, replace = FALSE)]
           Npick <- N[sample.int(length(N), m, replace = FALSE)]
-
-          # random pairing permutation
           Npick <- Npick[sample.int(length(Npick), length(Npick), replace = FALSE)]
 
-          # Fill pairing columns
           neg_id[Ppick] <- id[Npick]
           pos_id[Npick] <- id[Ppick]
           isneg[Npick]  <- 1L
-          setv[Npick]   <- "matched_negative"  # <- aligns with plot functions
+          setv[Npick]   <- "matched_negative"
 
           if (!is.null(meta)) {
             okm <- is.finite(meta[Ppick]) & is.finite(meta[Npick])
@@ -1382,7 +690,6 @@ random_drach_within_transcript <- function(gr,
   if (!is.null(meta)) mc[[dmeta_col]] <- meta_delta
   S4Vectors::mcols(gr) <- mc
 
-  # Invariants: positives must never be treated as negatives
   if (assert_invariants) {
     pos_idx <- which(y == 1L)
     neg_idx <- which(y == 0L)
@@ -1400,7 +707,6 @@ random_drach_within_transcript <- function(gr,
       stop("Invariant violation: at least one label==1 site was marked as a negative.")
     }
 
-    # Matched positives should equal matched negatives in 1:1 mode
     n_pos_matched <- sum(!is.na(neg_id[pos_idx]))
     n_neg_matched <- sum(!is.na(pos_id[neg_idx]))
     if (n_pos_matched != n_neg_matched) {
@@ -1409,7 +715,6 @@ random_drach_within_transcript <- function(gr,
     }
   }
 
-  # NEW: write canonical columns used by plot_* and match_background_simple()
   if (write_standard_cols) {
     gr <- .txrand_write_standard_cols(
       gr,
@@ -1423,17 +728,19 @@ random_drach_within_transcript <- function(gr,
   }
 
   if (return_diagnostics) {
-    diag <- list(
+    attr(gr, paste0(prefix, "_diagnostics")) <- list(
       n_pos_total = sum(y == 1L, na.rm = TRUE),
       n_neg_total = sum(y == 0L, na.rm = TRUE),
       n_pos_in_scope = length(pos_all),
       n_neg_drach_in_scope = length(neg_all),
       match_location = match_location,
       match_kmer = match_kmer,
+      split_col = split_col,
+      match_splits = match_splits,
+      drop_na_split = drop_na_split,
       n_pairs = pairs,
-      note = "Prefix columns are written, and (optionally) canonical match_* columns are also written."
+      note = "Prefix columns written; canonical match_* columns optionally written."
     )
-    attr(gr, paste0(prefix, "_diagnostics")) <- diag
   }
 
   gr
@@ -1785,31 +1092,35 @@ plot_kmer_counts <- function(gr,
 #' Subset a GRanges to balanced matched positive/negative pairs
 #'
 #' Extracts a strictly paired dataset from canonical match columns
-#' (\code{matched_negative_id}, \code{matched_positive_id}) so the output contains
+#' (matched_negative_id, matched_positive_id) so the output contains
 #' exactly one negative per positive for all retained pairs.
 #'
-#' @param gr A \code{GRanges} with canonical match columns produced by
-#'   \code{\link{match_background}} or \code{\link{random_drach_within_transcript}}.
+#' Optionally, you can preserve entire split(s) in "raw" form (unbalanced),
+#' e.g. keep testing (and/or validation) untouched while subsetting only training.
+#'
+#' @param gr A GRanges with canonical match columns produced by match_background()
+#'   or random_drach_within_transcript().
 #' @param matched_negative_id_col Column containing the matched negative ID for each positive.
 #' @param matched_positive_id_col Column containing the matched positive ID for each negative.
-#' @param is_positive_col Optional column indicating positives (1/0). If NULL, uses \code{label_col}.
-#' @param label_col Label column (0/1) used when \code{is_positive_col} is NULL.
+#' @param is_positive_col Optional column indicating positives (1/0). If NULL, uses label_col.
+#' @param label_col Label column (0/1) used when is_positive_col is NULL.
 #' @param strict_reciprocal If TRUE enforce reciprocal links (negative points back to the same positive).
 #' @param drop_conflicts If TRUE drop duplicated negative assignments if present.
-#' @param return_diagnostics If TRUE attach a \code{"subset_pairs_diagnostics"} attribute.
+#' @param maintain_testing Optional column name (e.g. "dataset_split") defining splits.
+#' @param testing_value Split label(s) to preserve in raw form. Can be a character vector,
+#'   e.g. c("testing","validation"). Default is "testing".
+#' @param return_diagnostics If TRUE attach a "subset_pairs_diagnostics" attribute.
 #'
-#' @returns A \code{GRanges} containing only matched pairs (2 rows per pair).
+#' @returns A GRanges containing matched pairs from non-heldout splits, plus all preserved split rows.
 #' @export
 subset_matched_pairs <- function(gr,
-                                 # canonical columns produced by match_background() / random_drach_within_transcript()
                                  matched_negative_id_col = "matched_negative_id",
                                  matched_positive_id_col = "matched_positive_id",
-                                 is_positive_col = NULL,   # if NULL, will fall back to label_col
+                                 is_positive_col = NULL,
                                  label_col = "label",
-                                 strict_reciprocal = TRUE, # enforce neg->pos points back correctly
-                                 drop_conflicts = TRUE,    # drop duplicate neg assignments if present
-                                 # NEW: keep all rows in testing split (raw/unbalanced)
-                                 maintain_testing = NULL,  # column name (e.g. "dataset_split") or NULL
+                                 strict_reciprocal = TRUE,
+                                 drop_conflicts = TRUE,
+                                 maintain_testing = NULL,
                                  testing_value = "testing",
                                  return_diagnostics = TRUE) {
   stopifnot(inherits(gr, "GRanges"))
@@ -1831,31 +1142,38 @@ subset_matched_pairs <- function(gr,
   }
 
   # -------------------------
-  # NEW: define testing rows to preserve
+  # Define held-out rows to preserve (raw/unbalanced)
   # -------------------------
-  testing_idx <- integer(0)
-  work_idx <- seq_along(gr)  # rows on which we will construct matched-pair subset
+  heldout_idx <- integer(0)
+  work_idx <- seq_along(gr)
 
   if (!is.null(maintain_testing)) {
     if (!(maintain_testing %in% colnames(mc))) {
       stop("maintain_testing='", maintain_testing, "' but column not found in mcols(gr). ",
            "Did you run assign_split_by_chromosome(..., split_col='", maintain_testing, "') first?")
     }
-    split_vec <- as.character(mc[[maintain_testing]])
-    testing_idx <- which(!is.na(split_vec) & split_vec == testing_value)
-    work_idx <- setdiff(work_idx, testing_idx)
 
-    # If everything is testing, return full GRanges unchanged
+    split_vec <- as.character(mc[[maintain_testing]])
+
+    testing_value <- unique(as.character(testing_value))
+    testing_value <- testing_value[!is.na(testing_value) & nzchar(testing_value)]
+
+    if (length(testing_value)) {
+      heldout_idx <- which(!is.na(split_vec) & split_vec %in% testing_value)
+      work_idx <- setdiff(work_idx, heldout_idx)
+    }
+
+    # If everything is held-out, return full GRanges unchanged
     if (!length(work_idx)) {
       out <- gr
       if (return_diagnostics) {
         attr(out, "subset_pairs_diagnostics") <- list(
           n_total_in = length(gr),
           maintain_testing = maintain_testing,
-          testing_value = testing_value,
-          n_testing_in = length(testing_idx),
-          n_pairs_out_non_testing = 0L,
-          note = "All rows are in testing; returning input unchanged."
+          heldout_values = testing_value,
+          n_heldout_in = length(heldout_idx),
+          n_pairs_out_non_heldout = 0L,
+          note = "All rows are in held-out split(s); returning input unchanged."
         )
       }
       return(out)
@@ -1863,7 +1181,7 @@ subset_matched_pairs <- function(gr,
   }
 
   # -------------------------
-  # Determine positives *within work_idx*
+  # Determine positives within work_idx
   # -------------------------
   if (!is.null(is_positive_col) && (is_positive_col %in% colnames(mc))) {
     pos_flag <- mc[[is_positive_col]]
@@ -1882,10 +1200,9 @@ subset_matched_pairs <- function(gr,
     pos_idx_all <- which(y == 1L)
   }
 
-  # Only match/subset pairs outside testing
   pos_idx_all <- intersect(pos_idx_all, work_idx)
 
-  # Build (positive_id -> negative_id) table from the *positive* rows
+  # Positive -> matched negative ID
   neg_id_for_pos <- as.character(mc[[matched_negative_id_col]][pos_idx_all])
   ok <- !is.na(neg_id_for_pos) & nzchar(neg_id_for_pos)
 
@@ -1893,7 +1210,7 @@ subset_matched_pairs <- function(gr,
   pos_ids <- ids[pos_idx]
   neg_ids <- neg_id_for_pos[ok]
 
-  # Keep only pairs where the referenced negative exists AND is outside testing
+  # referenced negatives must exist AND be in work_idx
   neg_idx <- match(neg_ids, ids)
   ok2 <- !is.na(neg_idx) & (neg_idx %in% work_idx)
 
@@ -1903,27 +1220,24 @@ subset_matched_pairs <- function(gr,
   neg_idx <- neg_idx[ok2]
 
   if (!length(pos_idx)) {
-    # No pairs found outside testing
-    keep_idx <- testing_idx
-    out <- gr[keep_idx]
-
+    out <- gr[heldout_idx]
     if (return_diagnostics) {
       attr(out, "subset_pairs_diagnostics") <- list(
         n_total_in = length(gr),
         n_total_out = length(out),
-        n_pos_total_in = length(pos_idx_all),
-        n_pairs_out_non_testing = 0L,
+        n_pos_total_in_non_heldout = length(pos_idx_all),
+        n_pairs_out_non_heldout = 0L,
         maintain_testing = maintain_testing,
-        testing_value = testing_value,
-        n_testing_in = length(testing_idx),
-        n_testing_out = length(testing_idx),
-        reason = "No positives outside testing with a valid matched_negative_id pointing to a non-testing negative."
+        heldout_values = unique(as.character(testing_value)),
+        n_heldout_in = length(heldout_idx),
+        n_heldout_out = length(heldout_idx),
+        reason = "No positives outside held-out splits with a valid matched_negative_id pointing to a non-heldout negative."
       )
     }
     return(out)
   }
 
-  # Optional: drop duplicated negative assignments
+  # Optional: drop duplicate negative assignments
   if (drop_conflicts) {
     dup_neg <- duplicated(neg_ids)
     if (any(dup_neg)) {
@@ -1935,7 +1249,7 @@ subset_matched_pairs <- function(gr,
     }
   }
 
-  # Optional: enforce reciprocal mapping (negative points back to the same positive)
+  # Optional: enforce reciprocal mapping
   if (strict_reciprocal) {
     back <- as.character(mc[[matched_positive_id_col]][neg_idx])
     ok3 <- !is.na(back) & nzchar(back) & (back == pos_ids)
@@ -1946,31 +1260,31 @@ subset_matched_pairs <- function(gr,
     neg_idx <- neg_idx[ok3]
   }
 
-  # Final keep set:
-  # - balanced pairs from non-testing
-  # - plus ALL testing rows (raw)
+  # Keep:
+  # - matched pairs from non-heldout
+  # - plus all heldout rows raw
   keep_pairs_idx <- unique(c(pos_idx, neg_idx))
-  keep_idx <- unique(c(keep_pairs_idx, testing_idx))
-
+  keep_idx <- unique(c(keep_pairs_idx, heldout_idx))
   out <- gr[keep_idx]
 
   if (return_diagnostics) {
     mc2 <- S4Vectors::mcols(out)
-
     y2 <- if (label_col %in% colnames(mc2)) as.integer(mc2[[label_col]]) else rep(NA_integer_, length(out))
     split2 <- if (!is.null(maintain_testing) && maintain_testing %in% colnames(mc2)) as.character(mc2[[maintain_testing]]) else NULL
+
+    heldout_values <- unique(as.character(testing_value))
 
     attr(out, "subset_pairs_diagnostics") <- list(
       n_total_in = length(gr),
       n_total_out = length(out),
-      n_pairs_out_non_testing = length(pos_idx),
-      expected_rows_out_non_testing = 2L * length(pos_idx),
+      n_pairs_out_non_heldout = length(pos_idx),
+      expected_rows_out_non_heldout = 2L * length(pos_idx),
       strict_reciprocal = strict_reciprocal,
       drop_conflicts = drop_conflicts,
       maintain_testing = maintain_testing,
-      testing_value = testing_value,
-      n_testing_in = length(testing_idx),
-      n_testing_out = if (is.null(split2)) NA_integer_ else sum(!is.na(split2) & split2 == testing_value),
+      heldout_values = heldout_values,
+      n_heldout_in = length(heldout_idx),
+      n_heldout_out = if (is.null(split2)) NA_integer_ else sum(!is.na(split2) & split2 %in% heldout_values),
       n_pos_out = sum(y2 == 1L, na.rm = TRUE),
       n_neg_out = sum(y2 == 0L, na.rm = TRUE)
     )
@@ -1978,6 +1292,7 @@ subset_matched_pairs <- function(gr,
 
   out
 }
+
 
 
 
@@ -2474,4 +1789,292 @@ write_h5_classification_from_granges <- function(gr,
 makeID <- function(gr,strand=TRUE) {
   names(gr) <- .site_id(gr,strand)
   gr
+}
+
+
+
+
+#' Balance matched positive/negative pairs by m6A ratio bins
+#'
+#' Downsamples *positive* sites (label==1) to equalize their distribution across
+#' user-defined ratio bins (e.g. 0-0.2, 0.2-0.4, ...), while preserving matched pairs:
+#' for every retained positive, its matched negative is kept as well.
+#'
+#' By default, this is intended to be applied to the *training* split only,
+#' leaving validation/testing untouched to preserve realistic evaluation.
+#'
+#' @param gr A \code{GRanges} containing positives and negatives, plus match columns.
+#' @param ratio_col Metadata column containing the ratio in [0,1] (e.g. "Ratio").
+#' @param label_col Metadata column containing 0/1 labels (default "label").
+#' @param matched_negative_id_col Column giving the matched negative ID for each positive.
+#' @param matched_positive_id_col Column giving the matched positive ID for each matched negative.
+#'   Only required if \code{strict_reciprocal=TRUE}.
+#' @param split_col Optional split column (e.g. "dataset_split"). If provided, only rows
+#'   in \code{balance_splits} are resampled; other splits are kept unchanged.
+#' @param balance_splits Which split label(s) to balance (default "training").
+#' @param breaks Optional numeric breaks for binning the ratio. Default makes 0.2-width bins.
+#' @param bin_width Optional alternative to \code{breaks}. If provided, builds breaks as
+#'   \code{seq(0, 1, by=bin_width)} (ensuring 1 is included).
+#' @param clamp_ratio If TRUE, clamp ratio values to [0,1] before binning.
+#' @param missing_ratio What to do with positives that have missing/non-finite ratio:
+#'   "drop" removes them from the balanced subset; "keep" keeps them (unbalanced).
+#' @param target_n_per_bin Optional integer. If NULL (default), uses the minimum count
+#'   among non-empty bins (pure downsampling, perfectly balanced across non-empty bins).
+#'   If provided and larger than that minimum, it is reduced to the minimum (no upsampling).
+#' @param strict_reciprocal If TRUE, require the negative to point back to the same positive.
+#' @param drop_conflicts If TRUE, enforce that a negative is used at most once (drop duplicates).
+#' @param require_same_split If TRUE and \code{split_col} is provided, require that each kept
+#'   positive/negative pair lies in the same split label.
+#' @param seed Random seed for reproducible downsampling.
+#' @param return_diagnostics If TRUE, attach a \code{"balance_ratio_diagnostics"} attribute.
+#'
+#' @return A subset \code{GRanges} with balanced positives (in the chosen split(s))
+#'   plus their matched negatives, and all untouched rows from other splits (if any).
+#' @export
+balance_pairs_by_ratio <- function(gr,
+                                   ratio_col = "Ratio",
+                                   label_col = "label",
+                                   matched_negative_id_col = "matched_negative_id",
+                                   matched_positive_id_col = "matched_positive_id",
+                                   split_col = NULL,
+                                   balance_splits = "training",
+                                   breaks = seq(0, 1, by = 0.2),
+                                   bin_width = NULL,
+                                   clamp_ratio = TRUE,
+                                   missing_ratio = c("drop", "keep"),
+                                   target_n_per_bin = NULL,
+                                   strict_reciprocal = TRUE,
+                                   drop_conflicts = TRUE,
+                                   require_same_split = TRUE,
+                                   seed = 1L,
+                                   return_diagnostics = TRUE) {
+  stopifnot(inherits(gr, "GRanges"))
+  missing_ratio <- match.arg(missing_ratio)
+
+  mc <- S4Vectors::mcols(gr)
+
+  if (!(ratio_col %in% colnames(mc))) stop("Missing ratio_col in mcols(gr): ", ratio_col)
+  if (!(label_col %in% colnames(mc))) stop("Missing label_col in mcols(gr): ", label_col)
+  if (!(matched_negative_id_col %in% colnames(mc))) {
+    stop("Missing `", matched_negative_id_col, "` in mcols(gr). Need match_background()/random_drach_within_transcript() output.")
+  }
+  if (strict_reciprocal && !(matched_positive_id_col %in% colnames(mc))) {
+    stop("strict_reciprocal=TRUE but missing `", matched_positive_id_col, "` in mcols(gr).")
+  }
+
+  # Stable IDs
+  if (is.null(names(gr)) || anyDuplicated(names(gr))) {
+    names(gr) <- paste0("site_", seq_len(length(gr)))
+  }
+  ids <- names(gr)
+
+  # Parse splits
+  all_idx <- seq_along(gr)
+  balance_idx <- all_idx
+  keep_untouched_idx <- integer(0)
+  split_vec <- NULL
+
+  if (!is.null(split_col)) {
+    if (!(split_col %in% colnames(mc))) stop("split_col not found in mcols(gr): ", split_col)
+    split_vec <- as.character(mc[[split_col]])
+    balance_splits <- as.character(balance_splits)
+
+    balance_idx <- which(!is.na(split_vec) & split_vec %in% balance_splits)
+    keep_untouched_idx <- setdiff(all_idx, balance_idx)
+
+    if (!length(balance_idx)) {
+      if (return_diagnostics) {
+        attr(gr, "balance_ratio_diagnostics") <- list(
+          n_total_in = length(gr),
+          split_col = split_col,
+          balance_splits = balance_splits,
+          n_in_balance_splits = 0L,
+          reason = "No rows in requested balance_splits; returning input unchanged."
+        )
+      }
+      return(gr)
+    }
+  }
+
+  # Labels -> integer 0/1
+  y <- mc[[label_col]]
+  if (is.logical(y)) y <- as.integer(y)
+  if (is.factor(y))  y <- as.integer(as.character(y))
+  y <- as.integer(y)
+
+  pos_idx0 <- intersect(which(y == 1L), balance_idx)
+  if (!length(pos_idx0)) {
+    out <- gr[sort(unique(c(keep_untouched_idx)))]
+    if (return_diagnostics) {
+      attr(out, "balance_ratio_diagnostics") <- list(
+        n_total_in = length(gr),
+        n_total_out = length(out),
+        n_pos_in_balance_splits = 0L,
+        reason = "No positives in balance_splits."
+      )
+    }
+    return(out)
+  }
+
+  # Candidate pairs: positive must have a valid matched negative that exists
+  neg_ids0 <- as.character(mc[[matched_negative_id_col]][pos_idx0])
+  ok <- !is.na(neg_ids0) & nzchar(neg_ids0)
+  pos_idx <- pos_idx0[ok]
+  neg_ids <- neg_ids0[ok]
+
+  neg_idx <- match(neg_ids, ids)
+  ok2 <- !is.na(neg_idx)
+  pos_idx <- pos_idx[ok2]
+  neg_idx <- neg_idx[ok2]
+  neg_ids <- neg_ids[ok2]
+
+  # Optionally require same split (prevents cross-split contamination)
+  if (require_same_split && !is.null(split_vec)) {
+    sp_pos <- split_vec[pos_idx]
+    sp_neg <- split_vec[neg_idx]
+    okS <- !is.na(sp_pos) & !is.na(sp_neg) & (sp_pos == sp_neg)
+    pos_idx <- pos_idx[okS]
+    neg_idx <- neg_idx[okS]
+    neg_ids <- neg_ids[okS]
+  }
+
+  # Optionally enforce reciprocal link
+  if (strict_reciprocal) {
+    back <- as.character(mc[[matched_positive_id_col]][neg_idx])
+    ok3 <- !is.na(back) & nzchar(back) & (back == ids[pos_idx])
+    pos_idx <- pos_idx[ok3]
+    neg_idx <- neg_idx[ok3]
+    neg_ids <- neg_ids[ok3]
+  }
+
+  if (!length(pos_idx)) {
+    out <- gr[sort(unique(c(keep_untouched_idx)))]
+    if (return_diagnostics) {
+      attr(out, "balance_ratio_diagnostics") <- list(
+        n_total_in = length(gr),
+        n_total_out = length(out),
+        n_pos_in_balance_splits = length(pos_idx0),
+        n_pairs_candidate = 0L,
+        reason = "No valid matched pairs among positives in balance_splits after filtering."
+      )
+    }
+    return(out)
+  }
+
+  # Enforce unique negatives if requested
+  if (drop_conflicts) {
+    set.seed(seed)
+    o <- sample(seq_along(pos_idx))  # random tie-breaking among duplicates
+    pos_idx <- pos_idx[o]; neg_idx <- neg_idx[o]; neg_ids <- neg_ids[o]
+
+    dup_neg <- duplicated(neg_ids)
+    if (any(dup_neg)) {
+      keep <- !dup_neg
+      pos_idx <- pos_idx[keep]
+      neg_idx <- neg_idx[keep]
+      neg_ids <- neg_ids[keep]
+    }
+  }
+
+  # Ratio vector for candidate positives
+  r <- suppressWarnings(as.numeric(mc[[ratio_col]][pos_idx]))
+  if (clamp_ratio) r <- pmin(1, pmax(0, r))
+
+  okR <- is.finite(r)
+  pos_missing_ratio <- pos_idx[!okR]
+  neg_missing_ratio <- neg_idx[!okR]
+
+  pos_idxR <- pos_idx[okR]
+  neg_idxR <- neg_idx[okR]
+  rR <- r[okR]
+
+  # Build breaks from bin_width if provided
+  if (!is.null(bin_width)) {
+    bw <- as.numeric(bin_width)
+    if (!is.finite(bw) || bw <= 0) stop("bin_width must be > 0.")
+    breaks <- seq(0, 1, by = bw)
+    if (tail(breaks, 1) < 1) breaks <- c(breaks, 1)
+  }
+
+  breaks <- as.numeric(breaks)
+  breaks <- sort(unique(breaks))
+  if (length(breaks) < 2) stop("breaks must have at least 2 unique values.")
+  if (breaks[1] > 0) breaks <- c(0, breaks)
+  if (tail(breaks, 1) < 1) breaks <- c(breaks, 1)
+
+  # Bin positives by ratio
+  bin <- cut(rR, breaks = breaks, include.lowest = TRUE, right = TRUE)
+  bin_chr <- as.character(bin)
+  bin_counts <- table(bin_chr, useNA = "no")
+
+  if (!length(bin_counts)) {
+    # No finite ratio positives
+    keep_balance_idx <- integer(0)
+  } else {
+    min_nonzero <- min(as.integer(bin_counts))
+
+    target <- min_nonzero
+    if (!is.null(target_n_per_bin)) {
+      target_n_per_bin <- as.integer(target_n_per_bin)
+      if (!is.finite(target_n_per_bin) || target_n_per_bin < 1L) {
+        stop("target_n_per_bin must be a positive integer.")
+      }
+      if (target_n_per_bin > min_nonzero) {
+        warning("target_n_per_bin > min nonzero bin count (", min_nonzero,
+                "); reducing to ", min_nonzero, " (no upsampling).")
+        target <- min_nonzero
+      } else {
+        target <- target_n_per_bin
+      }
+    }
+
+    # Sample equal number per non-empty bin
+    set.seed(seed)
+    pos_keep <- integer(0)
+    for (bn in names(bin_counts)) {
+      idx_bn <- which(bin_chr == bn)
+      pos_bn <- pos_idxR[idx_bn]
+      if (length(pos_bn) >= target) {
+        pos_keep <- c(pos_keep, sample(pos_bn, size = target, replace = FALSE))
+      }
+    }
+
+    # Get corresponding negatives via mapping pos_idxR -> neg_idxR
+    sel <- match(pos_keep, pos_idxR)
+    neg_keep <- neg_idxR[sel]
+
+    keep_balance_idx <- unique(c(pos_keep, neg_keep))
+
+    # Optionally keep missing-ratio positives (and their negatives) unbalanced
+    if (missing_ratio == "keep" && length(pos_missing_ratio)) {
+      keep_balance_idx <- unique(c(keep_balance_idx, pos_missing_ratio, neg_missing_ratio))
+    }
+  }
+
+  # Final output:
+  # - keep all rows NOT in balance_splits unchanged
+  # - within balance_splits keep only balanced matched pairs (and optionally missing_ratio kept)
+  out_idx <- sort(unique(c(keep_untouched_idx, keep_balance_idx)))
+  out <- gr[out_idx]
+
+  if (return_diagnostics) {
+    attr(out, "balance_ratio_diagnostics") <- list(
+      n_total_in = length(gr),
+      n_total_out = length(out),
+      split_col = split_col,
+      balance_splits = balance_splits,
+      n_in_balance_splits_in = length(balance_idx),
+      n_pos_in_balance_splits_in = length(pos_idx0),
+      n_candidate_pairs = length(pos_idx),
+      breaks = breaks,
+      bin_counts_candidates = as.list(bin_counts),
+      target_n_per_bin = if (exists("target")) target else NA_integer_,
+      missing_ratio = missing_ratio,
+      strict_reciprocal = strict_reciprocal,
+      drop_conflicts = drop_conflicts,
+      require_same_split = require_same_split
+    )
+  }
+
+  out
 }
