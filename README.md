@@ -98,36 +98,86 @@ The package preserves arbitrary existing metadata by default. It replaces only c
 ## Loading sites from files
 
 ```r
-sites <- load_sites("sacsGR.Rdat", object = "sacsGR")
+sites <- load_sites("sacsGR.Rdat")
 
-bed_sites <- import_bed_sites(
-  "sites.bed",
-  seqstyle = "UCSC",
-  chrs = paste0("chr", c(1:22, "X", "Y"))
-)
+# If needed, do simple organism-specific seqlevel handling in the script.
+# For example, Arabidopsis nuclear chromosomes:
+GenomeInfoDb::seqlevels(sites) <- sub("^([1-5])$", "Chr\\1", GenomeInfoDb::seqlevels(sites))
+sites <- GenomeInfoDb::keepSeqlevels(sites, paste0("Chr", 1:5), pruning.mode = "coarse")
+
+bed_sites <- import_bed_sites("sites.bed")
 ```
 
 `load_sites()` accepts `.rds`, `.RData`, `.Rda`, and `.Rdat` files. `import_bed_sites()` uses `rtracklayer::import()` and then applies `prepare_sites()`.
 
 ## Arabidopsis k-mers with TAIR BSgenome
 
-`BSgenome.Athaliana.TAIR.TAIR9` uses `Chr1` to `Chr5`, `ChrM`, and `ChrC`, while some TxDb resources use `1` to `5`. To annotate and extract k-mers in one run, standardise the TxDb to the BSgenome names first:
+`BSgenome.Athaliana.TAIR.TAIR9` uses `Chr1` to `Chr5`, `ChrM`, and `ChrC`, while some TxDb resources use `1` to `5`. Keep this explicit in the analysis script:
 
 ```r
 library(BSgenome.Athaliana.TAIR.TAIR9)
+library(GenomeInfoDb)
 
 genome <- BSgenome.Athaliana.TAIR.TAIR9::Athaliana
 arab_chrs <- paste0("Chr", 1:5)
 
-txdb <- standardize_seqlevels(
-  TxDb.Athaliana.BioMart.plantsmart51::TxDb.Athaliana.BioMart.plantsmart51,
-  target = genome,
-  chrs = arab_chrs,
-  keep = TRUE
-)
+txdb <- TxDb.Athaliana.BioMart.plantsmart51::TxDb.Athaliana.BioMart.plantsmart51
+GenomeInfoDb::seqlevels(txdb) <- arab_chrs
+
+GenomeInfoDb::seqlevels(plant_sites) <- sub("^([1-5])$", "Chr\\1", GenomeInfoDb::seqlevels(plant_sites))
+plant_sites <- GenomeInfoDb::keepSeqlevels(plant_sites, arab_chrs, pruning.mode = "coarse")
 
 ann <- annotate_sites(plant_sites, txdb = txdb, chrs = arab_chrs)
 ann <- add_kmer(ann, genome = genome, k = 5, chrs = arab_chrs)
+```
+
+
+## Building candidate background universes
+
+Before matching, you need a candidate background universe. For m6A-like analyses this can be all eligible transcript-oriented adenosines, observed site-centred 5-mers such as DRACH-like contexts, or a specific IUPAC motif. The package provides simple generators for these cases.
+
+```r
+# All transcript-oriented As in the same foreground genes.
+bg_A <- make_base_universe(
+  foreground = ann,
+  txdb = txdb,
+  genome = genome,
+  base = "A",
+  scope = "genes"
+)
+
+# All observed foreground 5-mers in the same foreground genes.
+# Later using kmer_match = TRUE gives exact k-mer balance for matched pairs.
+bg_5mer <- make_kmer_universe(
+  foreground = ann,
+  txdb = txdb,
+  genome = genome,
+  kmer_col = "kmer",
+  min_count = 2,
+  scope = "genes"
+)
+
+# IUPAC motif example. DRACH is centred on the third character.
+bg_drach <- make_motif_universe(
+  foreground = ann,
+  txdb = txdb,
+  genome = genome,
+  patterns = "DRACH",
+  site_offset = 3,
+  scope = "genes"
+)
+
+combined <- combine_site_sets(ann, bg_5mer)
+combined <- annotate_sites(combined, txdb = txdb)
+combined <- add_kmer(combined, genome = genome, k = 5)
+
+# Simple baseline: random background from the same gene, optionally same k-mer.
+random_gene <- match_random_background(combined, group_col = "gene_id", kmer_match = TRUE)
+
+# More constrained matcher: same region/k-mer plus metagene and distance covariates.
+matched <- match_background(combined, kmer_match = TRUE, bin_match = TRUE)
+plot_metagene_density(matched, set_col = "match_set")
+plot_junction_distance_density(matched, set_col = "match_set")
 ```
 
 ## Compact output tables

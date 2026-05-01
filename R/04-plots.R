@@ -42,6 +42,30 @@
   df
 }
 
+.metagene_axis_settings <- function(gr, x_col) {
+  md <- S4Vectors::metadata(gr)
+  breaks3 <- if (identical(x_col, "metagene_prop")) c(1, 2) else md$metagene_breaks3
+  if (is.null(breaks3) || length(breaks3) < 2L || any(!is.finite(as.numeric(breaks3[1:2])))) {
+    breaks3 <- c(1, 2)
+  } else {
+    breaks3 <- as.numeric(breaks3[1:2])
+  }
+  centres <- c(breaks3[1] / 2, mean(breaks3), breaks3[2] + (3 - breaks3[2]) / 2)
+  list(
+    breaks = breaks3,
+    centres = centres,
+    labels = c("5' UTR", "CDS", "3' UTR")
+  )
+}
+
+.pretty_bp_axis <- function(max_bp, breaks_bp = c(0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000)) {
+  max_bp <- suppressWarnings(as.numeric(max_bp))
+  if (!is.finite(max_bp) || max_bp < 0) max_bp <- 0
+  br <- breaks_bp[breaks_bp <= max_bp]
+  if (!length(br)) br <- breaks_bp[1]
+  unique(br)
+}
+
 #' Plot metagene density
 #'
 #' Plots a density of annotated sites along a 0--3 metagene axis. If a match-set column
@@ -58,6 +82,9 @@
 #' @param location_col Region column.
 #' @param bw_adjust Density bandwidth multiplier.
 #' @param xlim X-axis limits.
+#' @param x_axis Either \code{"regions"} to label the x-axis as 5'UTR/CDS/3'UTR
+#'   or \code{"numeric"} to show the numeric metagene coordinate.
+#' @param x_label Optional x-axis title.
 #'
 #' @return A ggplot object.
 #' @export
@@ -69,8 +96,11 @@ plot_metagene_density <- function(gr,
                                   facet_by_location = FALSE,
                                   location_col = "location",
                                   bw_adjust = 1,
-                                  xlim = c(0, 3)) {
+                                  xlim = c(0, 3),
+                                  x_axis = c("regions", "numeric"),
+                                  x_label = NULL) {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
+  x_axis <- match.arg(x_axis)
   x_col <- .auto_metagene_col(gr, x_col)
   cols <- c(x_col, if (facet_by_location) location_col else NULL)
   df <- .make_plot_df(gr, cols = cols, set_col = set_col,
@@ -80,30 +110,36 @@ plot_metagene_density <- function(gr,
   df <- df[is.finite(df$x_plot), , drop = FALSE]
   if (!nrow(df)) stop("No finite values in ", x_col)
 
-  md <- S4Vectors::metadata(gr)
-  breaks3 <- if (identical(x_col, "metagene_prop")) c(1, 2) else md$metagene_breaks3
-  if (is.null(breaks3) || length(breaks3) < 2L || any(!is.finite(as.numeric(breaks3[1:2])))) {
-    breaks3 <- c(1, 2)
+  axis_info <- .metagene_axis_settings(gr, x_col)
+  xlab <- x_label %||% if (x_axis == "regions") {
+    "Transcript region"
   } else {
-    breaks3 <- as.numeric(breaks3[1:2])
+    paste0(x_col, " (0-3 metagene coordinate)")
   }
 
   p <- ggplot2::ggplot(df, ggplot2::aes(x = x_plot, colour = group)) +
     ggplot2::geom_density(linewidth = 1, adjust = bw_adjust, na.rm = TRUE) +
-    ggplot2::geom_vline(xintercept = breaks3, linetype = 2) +
+    ggplot2::geom_vline(xintercept = axis_info$breaks, linetype = 2) +
     ggplot2::coord_cartesian(xlim = xlim) +
-    ggplot2::labs(x = paste0(x_col, " (0-3 axis)"), y = "Density", colour = NULL) +
+    ggplot2::labs(x = xlab, y = "Density", colour = NULL) +
     ggplot2::theme_bw()
+
+  if (x_axis == "regions") {
+    p <- p + ggplot2::scale_x_continuous(breaks = axis_info$centres, labels = axis_info$labels, minor_breaks = NULL)
+  }
 
   if (facet_by_location) {
     df$facet_location <- as.character(df[[location_col]])
     p <- ggplot2::ggplot(df, ggplot2::aes(x = x_plot, colour = group)) +
       ggplot2::geom_density(linewidth = 1, adjust = bw_adjust, na.rm = TRUE) +
-      ggplot2::geom_vline(xintercept = breaks3, linetype = 2) +
+      ggplot2::geom_vline(xintercept = axis_info$breaks, linetype = 2) +
       ggplot2::coord_cartesian(xlim = xlim) +
       ggplot2::facet_wrap(~ facet_location) +
-      ggplot2::labs(x = paste0(x_col, " (0-3 axis)"), y = "Density", colour = NULL) +
+      ggplot2::labs(x = xlab, y = "Density", colour = NULL) +
       ggplot2::theme_bw()
+    if (x_axis == "regions") {
+      p <- p + ggplot2::scale_x_continuous(breaks = axis_info$centres, labels = axis_info$labels, minor_breaks = NULL)
+    }
   }
 
   p
@@ -120,6 +156,8 @@ plot_metagene_density <- function(gr,
 #' @param facet_by_location If TRUE, facet by \code{location_col}.
 #' @param location_col Location column.
 #' @param bw_adjust Density bandwidth multiplier.
+#' @param x_label Optional x-axis title.
+#' @param breaks_bp Tick marks to show on the original bp scale when \code{transform = "log1p"}.
 #'
 #' @return A ggplot object.
 #' @export
@@ -131,7 +169,9 @@ plot_distance_density <- function(gr,
                                   transform = c("log1p", "identity"),
                                   facet_by_location = TRUE,
                                   location_col = "location",
-                                  bw_adjust = 1) {
+                                  bw_adjust = 1,
+                                  x_label = NULL,
+                                  breaks_bp = c(0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000)) {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   transform <- match.arg(transform)
 
@@ -143,17 +183,26 @@ plot_distance_density <- function(gr,
   df <- df[is.finite(df$value), , drop = FALSE]
   if (!nrow(df)) stop("No finite values in ", distance_col)
 
+  raw_value <- df$value
   if (transform == "log1p") {
     df$value <- log1p(pmax(df$value, 0))
-    xlab <- paste0("log1p(", distance_col, ")")
+    xlab <- x_label %||% paste0(distance_col, " (bp; log scale)")
+    bp_breaks <- .pretty_bp_axis(max(raw_value, na.rm = TRUE), breaks_bp = breaks_bp)
+    bp_labels <- format(bp_breaks, big.mark = ",", scientific = FALSE, trim = TRUE)
   } else {
-    xlab <- distance_col
+    xlab <- x_label %||% paste0(distance_col, " (bp)")
+    bp_breaks <- NULL
+    bp_labels <- NULL
   }
 
   p <- ggplot2::ggplot(df, ggplot2::aes(x = value, colour = group)) +
     ggplot2::geom_density(linewidth = 1, adjust = bw_adjust, na.rm = TRUE) +
     ggplot2::labs(x = xlab, y = "Density", colour = NULL) +
     ggplot2::theme_bw()
+
+  if (transform == "log1p") {
+    p <- p + ggplot2::scale_x_continuous(breaks = log1p(bp_breaks), labels = bp_labels)
+  }
 
   if (facet_by_location) {
     df$facet_location <- as.character(df[[location_col]])
@@ -162,6 +211,9 @@ plot_distance_density <- function(gr,
       ggplot2::facet_wrap(~ facet_location) +
       ggplot2::labs(x = xlab, y = "Density", colour = NULL) +
       ggplot2::theme_bw()
+    if (transform == "log1p") {
+      p <- p + ggplot2::scale_x_continuous(breaks = log1p(bp_breaks), labels = bp_labels)
+    }
   }
 
   p
@@ -178,7 +230,11 @@ plot_distance_density <- function(gr,
 plot_junction_distance_density <- function(gr,
                                            distance_col = "nearest_exon_junction_dist",
                                            ...) {
-  plot_distance_density(gr, distance_col = distance_col, ...)
+  args <- list(...)
+  if (!("x_label" %in% names(args))) {
+    args$x_label <- "Distance to nearest exon junction (bp; log scale)"
+  }
+  do.call(plot_distance_density, c(list(gr = gr, distance_col = distance_col), args))
 }
 
 #' Plot splice-proximity density

@@ -829,11 +829,11 @@ as_site_table <- function(gr, compatibility_names = TRUE, columns = c("all", "ba
 
   if (columns == "basic") {
     wanted <- c(
-      "label", "location", "feature", "region_class", "gene_id", "gene_symbol", "gene_name",
-      "tx_id", "tx_name", "transcript", "type", "metagene_prop", "metagene_split",
-      "metagene_split3", "nearest_exon_junction_dist", "start_dist", "stop_dist",
-      "start_dist_tx", "stop_dist_tx", "kmer", "match_set", "matched_negative_id",
-      "matched_positive_id", "match_distance", "split"
+      "label", "location", "gene_id", "gene_symbol", "gene_name",
+      "tx_id", "tx_name", "transcript", "metagene_split3",
+      "nearest_exon_junction_dist", "start_dist_tx", "stop_dist_tx", "kmer",
+      "candidate_pattern", "candidate_kmer", "match_set", "matched_negative_id",
+      "matched_positive_id", "meta_delta", "split"
     )
   } else {
     wanted <- colnames(mc)

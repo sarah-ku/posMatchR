@@ -4,43 +4,18 @@
 \alias{load_sites}
 \title{Load a GRanges site set from an RDS or RData file}
 \usage{
-load_sites(
-  path,
-  object = NULL,
-  label = NULL,
-  label_col = "label",
-  site_id_col = "site_id",
-  width_action = c("resize", "error"),
-  strip_mcols = FALSE,
-  seqstyle = NULL,
-  chrs = NULL
-)
+load_sites(path)
 }
 \arguments{
 \item{path}{Path to an \code{.rds}, \code{.RDS}, \code{.rda}, \code{.RData},
 or \code{.Rdat} file.}
-
-\item{object}{Optional object name for RData-style files.}
-
-\item{label}{Optional label passed to \code{prepare_sites()}.}
-
-\item{label_col}{Metadata column used for labels.}
-
-\item{site_id_col}{Metadata column used for stable site IDs.}
-
-\item{width_action}{Either \code{"resize"} or \code{"error"}.}
-
-\item{strip_mcols}{If TRUE, remove existing metadata except the generated site ID
-and optional label.}
-
-\item{seqstyle}{Optional GenomeInfoDb seqlevel style.}
-
-\item{chrs}{Optional seqlevels to keep.}
 }
 \value{
 A prepared single-nucleotide \code{GRanges}.
 }
 \description{
-Loads a \code{GRanges} object and normalises it for posMatchR. If an RData file
-contains exactly one \code{GRanges}, the object name can be omitted.
+A deliberately small file loader for examples and local smoke tests. For
+\file{.rds} files, the file must contain a \code{GRanges}. For RData-style
+files, the file must contain exactly one \code{GRanges}; if it contains more
+than one, load it manually and pass the object to \code{prepare_sites()}.
 }

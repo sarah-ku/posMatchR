@@ -4,10 +4,10 @@
 #   plant_sites: GRanges of observed plant sites, width 1
 #
 # The BioMart TxDb commonly uses seqlevels "1" to "5", whereas
-# BSgenome.Athaliana.TAIR.TAIR9 uses "Chr1" to "Chr5". The helper below renames
-# the TxDb to the BSgenome convention so annotation and k-mer extraction use the
-# same chromosome names. Mitochondrial/plastid contigs are dropped here because
-# the selected TxDb does not contain them.
+# BSgenome.Athaliana.TAIR.TAIR9 uses "Chr1" to "Chr5". This script keeps the
+# seqlevel handling explicit rather than hiding it in the loader. Mitochondrial
+# and plastid contigs are dropped here because this TxDb contains only the five
+# nuclear chromosomes.
 
 library(posMatchR)
 library(TxDb.Athaliana.BioMart.plantsmart51)
@@ -16,12 +16,11 @@ library(org.At.tair.db)
 
 arab_chrs <- paste0("Chr", 1:5)
 genome <- BSgenome.Athaliana.TAIR.TAIR9::Athaliana
-txdb <- standardize_seqlevels(
-  TxDb.Athaliana.BioMart.plantsmart51::TxDb.Athaliana.BioMart.plantsmart51,
-  target = genome,
-  chrs = arab_chrs,
-  keep = TRUE
-)
+txdb <- TxDb.Athaliana.BioMart.plantsmart51::TxDb.Athaliana.BioMart.plantsmart51
+GenomeInfoDb::seqlevels(txdb) <- arab_chrs
+
+GenomeInfoDb::seqlevels(plant_sites) <- sub("^([1-5])$", "Chr\\1", GenomeInfoDb::seqlevels(plant_sites))
+plant_sites <- GenomeInfoDb::keepSeqlevels(plant_sites, arab_chrs, pruning.mode = "coarse")
 
 ann <- annotate_sites(
   gr = plant_sites,

@@ -4,46 +4,16 @@
 \alias{import_bed_sites}
 \title{Import single-nucleotide sites from a BED file}
 \usage{
-import_bed_sites(
-  path,
-  genome = NULL,
-  label = NULL,
-  label_col = "label",
-  site_id_col = "site_id",
-  width_action = c("resize", "error"),
-  strip_mcols = FALSE,
-  seqstyle = NULL,
-  chrs = NULL,
-  ...
-)
+import_bed_sites(path)
 }
 \arguments{
 \item{path}{Path to a BED file.}
-
-\item{genome}{Optional genome argument forwarded to \code{rtracklayer::import()}.}
-
-\item{label}{Optional label passed to \code{prepare_sites()}.}
-
-\item{label_col}{Metadata column used for labels.}
-
-\item{site_id_col}{Metadata column used for stable site IDs. If the imported BED
-has a \code{name} column and no site ID, it is copied to this column.}
-
-\item{width_action}{Either \code{"resize"} or \code{"error"}.}
-
-\item{strip_mcols}{If TRUE, remove existing metadata except site ID and label.}
-
-\item{seqstyle}{Optional GenomeInfoDb seqlevel style.}
-
-\item{chrs}{Optional seqlevels to keep.}
-
-\item{...}{Additional arguments passed to \code{rtracklayer::import()}.}
 }
 \value{
 A prepared single-nucleotide \code{GRanges}.
 }
 \description{
-Uses \code{rtracklayer::import()} to read BED-like files as \code{GRanges},
-then prepares the result for posMatchR. BED coordinates are handled by
+Uses \code{rtracklayer::import()} to read a BED-like file as \code{GRanges},
+then applies \code{prepare_sites()}. BED coordinate conversion is handled by
 rtracklayer.
 }

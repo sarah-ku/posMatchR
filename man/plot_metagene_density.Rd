@@ -13,7 +13,9 @@ plot_metagene_density(
   facet_by_location = FALSE,
   location_col = "location",
   bw_adjust = 1,
-  xlim = c(0, 3)
+  xlim = c(0, 3),
+  x_axis = c("regions", "numeric"),
+  x_label = NULL
 )
 }
 \arguments{
@@ -35,6 +37,11 @@ plot_metagene_density(
 \item{bw_adjust}{Density bandwidth multiplier.}
 
 \item{xlim}{X-axis limits.}
+
+\item{x_axis}{Either \code{"regions"} to label the x-axis as 5'UTR/CDS/3'UTR
+or \code{"numeric"} to show the numeric metagene coordinate.}
+
+\item{x_label}{Optional x-axis title.}
 }
 \value{
 A ggplot object.

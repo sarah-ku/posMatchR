@@ -6,9 +6,9 @@
 \usage{
 compact_site_mcols(
   gr,
-  keep_cols = c("site_id", "label", "location", "feature", "region_class", "gene_id",
-    "gene_symbol", "gene_name", "tx_id", "tx_name", "metagene_split3", "kmer",
-    "match_set", "matched_negative_id", "matched_positive_id"),
+  keep_cols = c("site_id", "label", "location", "gene_id", "gene_symbol", "gene_name",
+    "tx_id", "tx_name", "metagene_split3", "kmer", "match_set", "matched_negative_id",
+    "matched_positive_id"),
   nested_col = "posmatchr_details"
 )
 }

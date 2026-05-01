@@ -49,33 +49,17 @@ standardize_seqlevels <- function(x,
 }
 #' Load a GRanges site set from an RDS or RData file
 #'
-#' Loads a \code{GRanges} object and normalises it for posMatchR. If an RData file
-#' contains exactly one \code{GRanges}, the object name can be omitted.
+#' A deliberately small file loader for examples and local smoke tests. For
+#' \file{.rds} files, the file must contain a \code{GRanges}. For RData-style
+#' files, the file must contain exactly one \code{GRanges}; if it contains more
+#' than one, load it manually and pass the object to \code{prepare_sites()}.
 #'
 #' @param path Path to an \code{.rds}, \code{.RDS}, \code{.rda}, \code{.RData},
 #'   or \code{.Rdat} file.
-#' @param object Optional object name for RData-style files.
-#' @param label Optional label passed to \code{prepare_sites()}.
-#' @param label_col Metadata column used for labels.
-#' @param site_id_col Metadata column used for stable site IDs.
-#' @param width_action Either \code{"resize"} or \code{"error"}.
-#' @param strip_mcols If TRUE, remove existing metadata except the generated site ID
-#'   and optional label.
-#' @param seqstyle Optional GenomeInfoDb seqlevel style.
-#' @param chrs Optional seqlevels to keep.
 #'
 #' @return A prepared single-nucleotide \code{GRanges}.
 #' @export
-load_sites <- function(path,
-                       object = NULL,
-                       label = NULL,
-                       label_col = "label",
-                       site_id_col = "site_id",
-                       width_action = c("resize", "error"),
-                       strip_mcols = FALSE,
-                       seqstyle = NULL,
-                       chrs = NULL) {
-  width_action <- match.arg(width_action)
+load_sites <- function(path) {
   if (!is.character(path) || length(path) != 1L || !nzchar(path)) stop("`path` must be a single file path.")
   if (!file.exists(path)) stop("File does not exist: ", path)
 
@@ -86,106 +70,48 @@ load_sites <- function(path,
     loaded <- load(path, envir = env)
     if (!length(loaded)) stop("No objects were loaded from: ", path)
 
-    if (!is.null(object)) {
-      if (!(object %in% loaded)) {
-        stop("Object '", object, "' was not found in ", path, ". Available objects: ", paste(loaded, collapse = ", "))
-      }
-      gr <- get(object, envir = env)
-    } else {
-      is_gr <- vapply(loaded, function(nm) inherits(get(nm, envir = env), "GRanges"), logical(1))
-      gr_names <- loaded[is_gr]
-      if (length(gr_names) != 1L) {
-        stop(
-          "Could not infer a single GRanges object from ", path,
-          ". Set `object=` explicitly. GRanges objects found: ", paste(gr_names, collapse = ", ")
-        )
-      }
-      gr <- get(gr_names[1L], envir = env)
+    is_gr <- vapply(loaded, function(nm) inherits(get(nm, envir = env), "GRanges"), logical(1))
+    gr_names <- loaded[is_gr]
+    if (length(gr_names) != 1L) {
+      stop(
+        "Could not infer a single GRanges object from ", path,
+        ". Load the file manually and call prepare_sites() on the object. GRanges objects found: ",
+        paste(gr_names, collapse = ", ")
+      )
     }
+    gr <- get(gr_names[1L], envir = env)
   }
 
   if (!inherits(gr, "GRanges")) stop("Loaded object is not a GRanges.")
-
-  if (!is.null(seqstyle)) suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- seqstyle, silent = TRUE))
-  if (!is.null(chrs)) {
-    gr <- .rename_seqlevels_to_target(gr, chrs)
-    mapped <- .map_to_target_seqlevels(chrs, GenomeInfoDb::seqlevels(gr))$mapped
-    mapped <- unique(mapped[!is.na(mapped) & nzchar(mapped)])
-    if (length(mapped)) gr <- GenomeInfoDb::keepSeqlevels(gr, mapped, pruning.mode = "coarse")
-  }
-
-  prepare_sites(
-    gr,
-    label = label,
-    label_col = label_col,
-    site_id_col = site_id_col,
-    width_action = width_action,
-    strip_mcols = strip_mcols
-  )
+  prepare_sites(gr)
 }
 
 #' Import single-nucleotide sites from a BED file
 #'
-#' Uses \code{rtracklayer::import()} to read BED-like files as \code{GRanges},
-#' then prepares the result for posMatchR. BED coordinates are handled by
+#' Uses \code{rtracklayer::import()} to read a BED-like file as \code{GRanges},
+#' then applies \code{prepare_sites()}. BED coordinate conversion is handled by
 #' rtracklayer.
 #'
 #' @param path Path to a BED file.
-#' @param genome Optional genome argument forwarded to \code{rtracklayer::import()}.
-#' @param label Optional label passed to \code{prepare_sites()}.
-#' @param label_col Metadata column used for labels.
-#' @param site_id_col Metadata column used for stable site IDs. If the imported BED
-#'   has a \code{name} column and no site ID, it is copied to this column.
-#' @param width_action Either \code{"resize"} or \code{"error"}.
-#' @param strip_mcols If TRUE, remove existing metadata except site ID and label.
-#' @param seqstyle Optional GenomeInfoDb seqlevel style.
-#' @param chrs Optional seqlevels to keep.
-#' @param ... Additional arguments passed to \code{rtracklayer::import()}.
 #'
 #' @return A prepared single-nucleotide \code{GRanges}.
 #' @export
-import_bed_sites <- function(path,
-                             genome = NULL,
-                             label = NULL,
-                             label_col = "label",
-                             site_id_col = "site_id",
-                             width_action = c("resize", "error"),
-                             strip_mcols = FALSE,
-                             seqstyle = NULL,
-                             chrs = NULL,
-                             ...) {
-  width_action <- match.arg(width_action)
+import_bed_sites <- function(path) {
   if (!requireNamespace("rtracklayer", quietly = TRUE)) {
     stop("Package 'rtracklayer' is required for BED import. Install it with BiocManager::install('rtracklayer').")
   }
+  if (!is.character(path) || length(path) != 1L || !nzchar(path)) stop("`path` must be a single file path.")
   if (!file.exists(path)) stop("File does not exist: ", path)
 
-  args <- list(con = path, format = "BED", ...)
-  if (!is.null(genome)) args$genome <- genome
-  gr <- do.call(rtracklayer::import, args)
-
+  gr <- rtracklayer::import(path, format = "BED")
   if (!inherits(gr, "GRanges")) stop("rtracklayer::import() did not return a GRanges.")
+
   mc <- S4Vectors::mcols(gr)
-  if (!(site_id_col %in% colnames(mc)) && "name" %in% colnames(mc)) {
-    S4Vectors::mcols(gr)[[site_id_col]] <- as.character(mc$name)
+  if (!("site_id" %in% colnames(mc)) && "name" %in% colnames(mc)) {
+    S4Vectors::mcols(gr)[["site_id"]] <- as.character(mc$name)
   }
 
-  if (!is.null(seqstyle)) suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- seqstyle, silent = TRUE))
-  if (!is.null(chrs)) {
-    gr <- .rename_seqlevels_to_target(gr, chrs)
-    mapped <- .map_to_target_seqlevels(chrs, GenomeInfoDb::seqlevels(gr))$mapped
-    mapped <- unique(mapped[!is.na(mapped) & nzchar(mapped)])
-    if (length(mapped)) gr <- GenomeInfoDb::keepSeqlevels(gr, mapped, pruning.mode = "coarse")
-  }
-
-  prepare_sites(
-    gr,
-    label = label,
-    label_col = label_col,
-    site_id_col = site_id_col,
-    width_action = width_action,
-    strip_mcols = strip_mcols
-  )
+  prepare_sites(gr)
 }
 
 #' Return a small display table for annotated sites
@@ -214,7 +140,7 @@ as_basic_site_table <- function(gr, compatibility_names = TRUE) {
 #' @export
 compact_site_mcols <- function(gr,
                                keep_cols = c(
-                                 "site_id", "label", "location", "feature", "region_class",
+                                 "site_id", "label", "location",
                                  "gene_id", "gene_symbol", "gene_name", "tx_id", "tx_name",
                                  "metagene_split3", "kmer", "match_set", "matched_negative_id",
                                  "matched_positive_id"

@@ -2,7 +2,7 @@
 # Local smoke test for human single-nucleotide GRanges, e.g. GLORI/m6A or A-to-I editing sites.
 # Usage:
 #   Rscript inst/examples/local_human_smoke_test.R /path/to/sites.rds
-#   Rscript inst/examples/local_human_smoke_test.R /path/to/sites.Rdat objectName output_dir
+#   Rscript inst/examples/local_human_smoke_test.R /path/to/sites.Rdat output_dir
 
 suppressPackageStartupMessages({
   library(posMatchR)
@@ -20,13 +20,15 @@ source(helper)
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 1L) {
-  stop("Usage: Rscript inst/examples/local_human_smoke_test.R /path/to/sites.rds [object_name] [output_dir]")
+  stop("Usage: Rscript inst/examples/local_human_smoke_test.R /path/to/sites.rds [output_dir]")
 }
 input_path <- args[[1]]
-object_name <- if (length(args) >= 2L && nzchar(args[[2]])) args[[2]] else NULL
-outdir <- if (length(args) >= 3L && nzchar(args[[3]])) args[[3]] else "posmatchr_human_smoke_results"
+outdir <- if (length(args) >= 2L && nzchar(args[[2]])) args[[2]] else "posmatchr_human_smoke_results"
 
-sites <- load_granges_object(input_path, object_name)
+sites <- posMatchR::load_sites(input_path)
+GenomeInfoDb::seqlevelsStyle(sites) <- "UCSC"
+canonical_chrs <- paste0("chr", c(1:22, "X", "Y"))
+sites <- GenomeInfoDb::keepSeqlevels(sites, canonical_chrs, pruning.mode = "coarse")
 if (length(sites) > 1000L) {
   message("Using the first 1000 sites for this smoke test. Edit the script to run all sites.")
   sites <- sites[seq_len(1000L)]
@@ -34,7 +36,6 @@ if (length(sites) > 1000L) {
 
 summarise_granges_for_smoke(sites, "raw human input")
 
-canonical_chrs <- paste0("chr", c(1:22, "X", "Y"))
 txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
 
 ann <- posMatchR::annotate_sites(

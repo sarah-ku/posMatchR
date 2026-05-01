@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 # Local smoke test for Arabidopsis single-nucleotide GRanges, e.g. SAC-seq or HyperTRIBE sites.
 # Usage:
-#   Rscript inst/examples/local_arabidopsis_smoke_test.R /path/to/sacsGR.Rdat sacsGR
-#   Rscript inst/examples/local_arabidopsis_smoke_test.R /path/to/sites.rds "" output_dir
+#   Rscript inst/examples/local_arabidopsis_smoke_test.R /path/to/sacsGR.Rdat output_dir
+#   Rscript inst/examples/local_arabidopsis_smoke_test.R /path/to/sites.rds output_dir
 
 suppressPackageStartupMessages({
   library(posMatchR)
@@ -22,16 +22,17 @@ source(helper)
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 1L) {
-  stop("Usage: Rscript inst/examples/local_arabidopsis_smoke_test.R /path/to/sites.rds [object_name] [output_dir]")
+  stop("Usage: Rscript inst/examples/local_arabidopsis_smoke_test.R /path/to/sites.rds [output_dir]")
 }
 input_path <- args[[1]]
-object_name <- if (length(args) >= 2L && nzchar(args[[2]])) args[[2]] else NULL
-outdir <- if (length(args) >= 3L && nzchar(args[[3]])) args[[3]] else "posmatchr_arabidopsis_smoke_results"
+outdir <- if (length(args) >= 2L && nzchar(args[[2]])) args[[2]] else "posmatchr_arabidopsis_smoke_results"
 
 canonical_chrs <- paste0("Chr", 1:5)
 genome <- BSgenome.Athaliana.TAIR.TAIR9::Athaliana
 
-sites <- posMatchR::load_sites(input_path, object = object_name, chrs = canonical_chrs)
+sites <- posMatchR::load_sites(input_path)
+GenomeInfoDb::seqlevels(sites) <- sub("^([1-5])$", "Chr\\1", GenomeInfoDb::seqlevels(sites))
+sites <- GenomeInfoDb::keepSeqlevels(sites, canonical_chrs, pruning.mode = "coarse")
 if (length(sites) > 1000L) {
   message("Using the first 1000 sites for this smoke test. Edit the script to run all sites.")
   sites <- sites[seq_len(1000L)]
@@ -39,12 +40,8 @@ if (length(sites) > 1000L) {
 
 summarise_granges_for_smoke(sites, "raw Arabidopsis input")
 
-txdb <- posMatchR::standardize_seqlevels(
-  TxDb.Athaliana.BioMart.plantsmart51::TxDb.Athaliana.BioMart.plantsmart51,
-  target = genome,
-  chrs = canonical_chrs,
-  keep = TRUE
-)
+txdb <- TxDb.Athaliana.BioMart.plantsmart51::TxDb.Athaliana.BioMart.plantsmart51
+GenomeInfoDb::seqlevels(txdb) <- canonical_chrs
 orgdb <- org.At.tair.db::org.At.tair.db
 org_cols <- AnnotationDbi::columns(orgdb)
 gene_name_col <- if ("GENENAME" %in% org_cols) "GENENAME" else NULL

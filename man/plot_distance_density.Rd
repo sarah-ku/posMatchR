@@ -13,7 +13,9 @@ plot_distance_density(
   transform = c("log1p", "identity"),
   facet_by_location = TRUE,
   location_col = "location",
-  bw_adjust = 1
+  bw_adjust = 1,
+  x_label = NULL,
+  breaks_bp = c(0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000)
 )
 }
 \arguments{
@@ -34,6 +36,10 @@ plot_distance_density(
 \item{location_col}{Location column.}
 
 \item{bw_adjust}{Density bandwidth multiplier.}
+
+\item{x_label}{Optional x-axis title.}
+
+\item{breaks_bp}{Tick marks to show on the original bp scale when \code{transform = "log1p"}.}
 }
 \value{
 A ggplot object.
