@@ -2,7 +2,7 @@ Package: posMatchR
 Type: Package
 Title: Annotate Single-Nucleotide RNA Sites and Build Matched Backgrounds
 Version: 0.1.0
-Authors@R: person("Sarah", "Ku", email = "sarah.b.rennie@gmail.com", role = c("aut", "cre"))
+Authors@R: person("Sarah", "Ku", email = "sarah.ku@example.com", role = c("aut", "cre"))
 Description: Tools for annotating single-nucleotide GRanges objects with transcript, gene,
     region, metagene, sequence-context, and feature-distance variables, and for constructing
     matched background sets for post-transcriptional site analyses such as RNA modifications,
@@ -34,6 +34,7 @@ Suggests:
     BSgenome.Athaliana.TAIR.TAIR9,
     org.Hs.eg.db,
     org.At.tair.db,
+    rtracklayer,
     testthat (>= 3.0.0),
     knitr,
     rmarkdown

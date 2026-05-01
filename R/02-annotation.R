@@ -447,7 +447,7 @@ add_feature_geometry <- function(gr, resources) {
   w <- rep(1.0, length(gr))
   ok_r <- !is.na(rid) & nzchar(rid)
   if (any(ok_r)) {
-    k <- as.numeric(ave(rid[ok_r], rid[ok_r], FUN = length))
+    k <- as.numeric(stats::ave(rid[ok_r], rid[ok_r], FUN = length))
     k[!is.finite(k) | k <= 0] <- NA_real_
     ww <- 1 / k
     ww[!is.finite(ww)] <- 1.0
@@ -725,17 +725,58 @@ add_kmer <- function(gr,
   if (!is.null(seqstyle)) {
     suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- seqstyle, silent = TRUE))
     suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(genome) <- seqstyle, silent = TRUE))
-  } else {
-    st <- tryCatch(GenomeInfoDb::seqlevelsStyle(genome), error = function(e) character(0))
-    if (length(st)) suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- st[1], silent = TRUE))
   }
 
-  common <- intersect(GenomeInfoDb::seqlevels(gr), GenomeInfoDb::seqlevels(genome))
-  if (!is.null(chrs)) {
-    mapped <- .map_to_target_seqlevels(chrs, common)
-    common <- mapped$mapped
+  genome_levels <- GenomeInfoDb::seqlevels(genome)
+  if (!length(genome_levels)) stop("`genome` has no seqlevels.")
+
+  # Prefer exact names that already match. This is important for TAIR packages,
+  # where the TxDb may use 1..5 but BSgenome.Athaliana.TAIR.TAIR9 uses Chr1..Chr5.
+  common <- intersect(GenomeInfoDb::seqlevels(gr), genome_levels)
+
+  if (!length(common) && is.null(seqstyle)) {
+    st <- tryCatch(GenomeInfoDb::seqlevelsStyle(genome), error = function(e) character(0))
+    if (length(st)) suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- st[1], silent = TRUE))
+    common <- intersect(GenomeInfoDb::seqlevels(gr), GenomeInfoDb::seqlevels(genome))
   }
-  if (!length(common)) stop("No common seqlevels between `gr` and `genome`.")
+
+  if (!length(common)) {
+    gr <- .rename_seqlevels_to_target(gr, GenomeInfoDb::seqlevels(genome))
+    common <- intersect(GenomeInfoDb::seqlevels(gr), GenomeInfoDb::seqlevels(genome))
+  }
+
+  if (!is.null(chrs)) {
+    target_common <- intersect(GenomeInfoDb::seqlevels(gr), GenomeInfoDb::seqlevels(genome))
+    mapped <- .map_to_target_seqlevels(chrs, target_common)
+    common <- mapped$mapped
+
+    if (!length(common)) {
+      mapped_to_genome <- .map_to_target_seqlevels(chrs, GenomeInfoDb::seqlevels(genome))$mapped
+      if (length(mapped_to_genome)) {
+        gr <- .rename_seqlevels_to_target(gr, mapped_to_genome)
+        target_common <- intersect(GenomeInfoDb::seqlevels(gr), GenomeInfoDb::seqlevels(genome))
+        mapped <- .map_to_target_seqlevels(mapped_to_genome, target_common)
+        common <- mapped$mapped
+      }
+    }
+  } else {
+    common <- intersect(GenomeInfoDb::seqlevels(gr), GenomeInfoDb::seqlevels(genome))
+  }
+
+  common <- unique(common[!is.na(common) & nzchar(common)])
+  if (!length(common)) {
+    stop(
+      "No common seqlevels between `gr` and `genome`.\n",
+      "seqlevels(gr): ", paste(GenomeInfoDb::seqlevels(gr), collapse = ", "), "\n",
+      "seqlevels(genome): ", paste(GenomeInfoDb::seqlevels(genome), collapse = ", ")
+    )
+  }
+
+  observed_before <- unique(as.character(GenomicRanges::seqnames(gr)))
+  dropped <- setdiff(observed_before, common)
+  if (length(dropped)) {
+    warning("Dropping site seqlevels not present in the selected genome/chrs: ", paste(dropped, collapse = ", "))
+  }
 
   gr <- GenomeInfoDb::keepSeqlevels(gr, common, pruning.mode = "coarse")
   try({
@@ -756,16 +797,23 @@ add_kmer <- function(gr,
   S4Vectors::mcols(gr)[[out_col]] <- seqs
   gr
 }
-
 #' Convert annotated sites to a scalar data.frame
+#'
+#' Converts an annotated \code{GRanges} to a base \code{data.frame}. The default
+#' \code{columns = "all"} keeps all scalar metadata columns. \code{columns = "basic"}
+#' returns a smaller table intended for quick inspection and reporting.
 #'
 #' @param gr A \code{GRanges}.
 #' @param compatibility_names If TRUE, include column names similar to the user's
 #'   earlier project wrapper, such as \code{primary_region_class}.
+#' @param columns Either \code{"all"} or \code{"basic"}. \code{"basic"} keeps
+#'   coordinates, site ID, labels, region/gene/transcript fields, metagene position,
+#'   k-mer and matching identifiers when present.
 #'
 #' @return A data.frame.
 #' @export
-as_site_table <- function(gr, compatibility_names = TRUE) {
+as_site_table <- function(gr, compatibility_names = TRUE, columns = c("all", "basic")) {
+  columns <- match.arg(columns)
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   mc <- S4Vectors::mcols(gr)
   n <- length(gr)
@@ -779,9 +827,23 @@ as_site_table <- function(gr, compatibility_names = TRUE) {
     stringsAsFactors = FALSE
   )
 
-  for (nm in colnames(mc)) {
+  if (columns == "basic") {
+    wanted <- c(
+      "label", "location", "feature", "region_class", "gene_id", "gene_symbol", "gene_name",
+      "tx_id", "tx_name", "transcript", "type", "metagene_prop", "metagene_split",
+      "metagene_split3", "nearest_exon_junction_dist", "start_dist", "stop_dist",
+      "start_dist_tx", "stop_dist_tx", "kmer", "match_set", "matched_negative_id",
+      "matched_positive_id", "match_distance", "split"
+    )
+  } else {
+    wanted <- colnames(mc)
+  }
+
+  for (nm in wanted) {
+    if (!(nm %in% colnames(mc))) next
     if (nm %in% colnames(df)) next
     x <- mc[[nm]]
+    if (methods::is(x, "DataFrame")) next
     if (is.numeric(x) || is.integer(x) || is.logical(x)) {
       df[[nm]] <- x
     } else {

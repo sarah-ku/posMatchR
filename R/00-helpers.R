@@ -1,4 +1,4 @@
-utils::globalVariables(c(
+globalVariables(c(
   "x_plot", "group", "value", "which_distance", "bin", "kmer", "facet_location"
 ))
 
@@ -228,6 +228,16 @@ prepare_sites <- function(gr,
     }
   }
 
+  if (!is.null(chrs)) {
+    gr <- .rename_seqlevels_to_target(gr, chrs, pruning.mode = pruning.mode)
+    txdb <- .rename_seqlevels_to_target(txdb, chrs, pruning.mode = pruning.mode)
+  } else {
+    direct_common <- intersect(GenomeInfoDb::seqlevels(gr), GenomeInfoDb::seqlevels(txdb))
+    if (!length(direct_common)) {
+      gr <- .rename_seqlevels_to_target(gr, GenomeInfoDb::seqlevels(txdb), pruning.mode = pruning.mode)
+    }
+  }
+
   gr_levels <- GenomeInfoDb::seqlevels(gr)
   tx_levels <- GenomeInfoDb::seqlevels(txdb)
   if (!length(tx_levels)) {
@@ -411,4 +421,72 @@ combine_site_sets <- function(positives,
   }
 
   c(pos, bg)
+}
+
+.seqlevel_candidates <- function(x) {
+  x <- as.character(x)
+  core <- sub("^(chr|Chr)", "", x, perl = TRUE)
+  out <- c(x, core, paste0("chr", core), paste0("Chr", core))
+
+  low <- tolower(core)
+  if (low %in% c("m", "mt", "mitochondria", "mitochondrial", "chrm", "chrmt")) {
+    out <- c(out, "M", "MT", "Mt", "chrM", "chrMT", "ChrM")
+  }
+  if (low %in% c("c", "pt", "cp", "chloroplast", "plastid", "chrc", "chrpt")) {
+    out <- c(out, "C", "Pt", "PT", "Cp", "chrC", "chrPt", "ChrC", "ChrPt")
+  }
+
+  unique(out[!is.na(out) & nzchar(out)])
+}
+
+.make_seqlevel_rename_map <- function(from, target) {
+  from <- as.character(from)
+  target <- as.character(target)
+  target <- target[!is.na(target) & nzchar(target)]
+  new <- from
+  matched <- rep(FALSE, length(from))
+
+  if (!length(target) || !length(from)) {
+    return(list(old = from, new = new, matched = matched))
+  }
+
+  target_lower <- tolower(target)
+  for (i in seq_along(from)) {
+    cand <- .seqlevel_candidates(from[i])
+    m <- match(tolower(cand), target_lower)
+    m <- m[!is.na(m)]
+    if (length(m)) {
+      new[i] <- target[m[1L]]
+      matched[i] <- TRUE
+    }
+  }
+
+  list(old = from, new = new, matched = matched)
+}
+
+.rename_seqlevels_to_target <- function(x, target, pruning.mode = "coarse") {
+  target <- as.character(target)
+  target <- target[!is.na(target) & nzchar(target)]
+  if (!length(target)) return(x)
+
+  old <- tryCatch(GenomeInfoDb::seqlevels(x), error = function(e) character(0))
+  if (!length(old)) return(x)
+
+  mp <- .make_seqlevel_rename_map(old, target)
+  if (!any(mp$matched) || identical(mp$old, mp$new)) return(x)
+
+  # Do not attempt a partial rename that would create duplicate seqlevels.
+  if (any(duplicated(mp$new))) return(x)
+
+  out <- tryCatch({
+    GenomeInfoDb::seqlevels(x, pruning.mode = pruning.mode) <- mp$new
+    x
+  }, error = function(e1) {
+    tryCatch({
+      GenomeInfoDb::seqlevels(x) <- mp$new
+      x
+    }, error = function(e2) x)
+  })
+
+  out
 }

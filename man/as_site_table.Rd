@@ -4,17 +4,23 @@
 \alias{as_site_table}
 \title{Convert annotated sites to a scalar data.frame}
 \usage{
-as_site_table(gr, compatibility_names = TRUE)
+as_site_table(gr, compatibility_names = TRUE, columns = c("all", "basic"))
 }
 \arguments{
 \item{gr}{A \code{GRanges}.}
 
 \item{compatibility_names}{If TRUE, include column names similar to the user's
 earlier project wrapper, such as \code{primary_region_class}.}
+
+\item{columns}{Either \code{"all"} or \code{"basic"}. \code{"basic"} keeps
+coordinates, site ID, labels, region/gene/transcript fields, metagene position,
+k-mer and matching identifiers when present.}
 }
 \value{
 A data.frame.
 }
 \description{
-Convert annotated sites to a scalar data.frame
+Converts an annotated \code{GRanges} to a base \code{data.frame}. The default
+\code{columns = "all"} keeps all scalar metadata columns. \code{columns = "basic"}
+returns a smaller table intended for quick inspection and reporting.
 }

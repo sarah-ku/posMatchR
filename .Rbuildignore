@@ -5,3 +5,7 @@
 ^README_files$
 ^doc$
 ^Meta$
+
+^REFACTOR_NOTES\.md$
+^posmatchr_.*_smoke_results$
+^_problems$

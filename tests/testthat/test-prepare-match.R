@@ -57,3 +57,21 @@ test_that("as_site_table returns scalar data frame", {
   expect_true("primary_region_class" %in% colnames(tab))
   expect_equal(tab$primary_region_class[1], "CDS")
 })
+
+test_that("basic site table is compact", {
+  skip_if_not_installed("GenomicRanges")
+  skip_if_not_installed("IRanges")
+
+  gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(10, 10), strand = "+")
+  gr <- prepare_sites(gr)
+  S4Vectors::mcols(gr)$location <- "coding"
+  S4Vectors::mcols(gr)$feature <- "CDS"
+  S4Vectors::mcols(gr)$tx_len <- 1000L
+  S4Vectors::mcols(gr)$nearest_exon_junction_dist <- 12L
+
+  tab_all <- as_site_table(gr, columns = "all")
+  tab_basic <- as_basic_site_table(gr)
+  expect_true("tx_len" %in% colnames(tab_all))
+  expect_false("tx_len" %in% colnames(tab_basic))
+  expect_true("nearest_exon_junction_dist" %in% colnames(tab_basic))
+})

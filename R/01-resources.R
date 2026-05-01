@@ -195,19 +195,19 @@ build_tx_resources <- function(txdb,
   tx_metrics <- compute_tx_metrics(txdb, include_introns = include_introns, introns_by_tx = introns_by_tx)
   tx_key <- .tx_key_from_metrics(tx_metrics)
 
-  tx_len <- setNames(as.numeric(tx_metrics$tx_len), tx_key)
-  cds_len <- setNames(as.numeric(tx_metrics$cds_len), tx_key)
-  five_len <- setNames(as.numeric(tx_metrics$utr5_len), tx_key)
-  three_len <- setNames(as.numeric(tx_metrics$utr3_len), tx_key)
+  tx_len <- stats::setNames(as.numeric(tx_metrics$tx_len), tx_key)
+  cds_len <- stats::setNames(as.numeric(tx_metrics$cds_len), tx_key)
+  five_len <- stats::setNames(as.numeric(tx_metrics$utr5_len), tx_key)
+  three_len <- stats::setNames(as.numeric(tx_metrics$utr3_len), tx_key)
   intr_len <- if ("intron_len" %in% names(tx_metrics)) {
-    setNames(as.numeric(tx_metrics$intron_len), tx_key)
+    stats::setNames(as.numeric(tx_metrics$intron_len), tx_key)
   } else {
-    setNames(rep(NA_real_, nrow(tx_metrics)), tx_key)
+    stats::setNames(rep(NA_real_, nrow(tx_metrics)), tx_key)
   }
 
   tx_names <- names(cds_by_tx)
-  cds_start <- setNames(rep(NA_integer_, length(tx_names)), tx_names)
-  cds_stop <- setNames(rep(NA_integer_, length(tx_names)), tx_names)
+  cds_start <- stats::setNames(rep(NA_integer_, length(tx_names)), tx_names)
+  cds_stop <- stats::setNames(rep(NA_integer_, length(tx_names)), tx_names)
 
   n_cds <- S4Vectors::elementNROWS(cds_by_tx)
   if (sum(n_cds) > 0L) {
