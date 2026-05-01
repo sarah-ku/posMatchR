@@ -27,11 +27,12 @@ if (length(args) < 1L) {
 input_path <- args[[1]]
 outdir <- if (length(args) >= 2L && nzchar(args[[2]])) args[[2]] else "posmatchr_arabidopsis_smoke_results"
 
-canonical_chrs <- paste0("Chr", 1:5)
+canonical_chrs <- c("1", "2", "3", "4", "5")
 genome <- BSgenome.Athaliana.TAIR.TAIR9::Athaliana
+GenomeInfoDb::seqlevels(genome) <- c("1", "2", "3", "4", "5", "Mt", "Pt")
 
 sites <- posMatchR::load_sites(input_path)
-GenomeInfoDb::seqlevels(sites) <- sub("^([1-5])$", "Chr\\1", GenomeInfoDb::seqlevels(sites))
+GenomeInfoDb::seqlevels(sites) <- sub("^Chr([1-5])$", "\\1", GenomeInfoDb::seqlevels(sites))
 sites <- GenomeInfoDb::keepSeqlevels(sites, canonical_chrs, pruning.mode = "coarse")
 if (length(sites) > 1000L) {
   message("Using the first 1000 sites for this smoke test. Edit the script to run all sites.")
@@ -41,7 +42,6 @@ if (length(sites) > 1000L) {
 summarise_granges_for_smoke(sites, "raw Arabidopsis input")
 
 txdb <- TxDb.Athaliana.BioMart.plantsmart51::TxDb.Athaliana.BioMart.plantsmart51
-GenomeInfoDb::seqlevels(txdb) <- canonical_chrs
 orgdb <- org.At.tair.db::org.At.tair.db
 org_cols <- AnnotationDbi::columns(orgdb)
 gene_name_col <- if ("GENENAME" %in% org_cols) "GENENAME" else NULL
@@ -63,7 +63,7 @@ ann <- posMatchR::add_kmer(ann, genome = genome, k = 5L, chrs = canonical_chrs)
 summarise_granges_for_smoke(ann, "annotated Arabidopsis output")
 cat("\nLocation counts:\n")
 print(table(S4Vectors::mcols(ann)$location, useNA = "ifany"))
-cat("\nNon-canonical sites are expected to be dropped when chrs = paste0('Chr', 1:5).\n")
+cat("\nNon-canonical sites are expected to be dropped when chrs = c('1', '2', '3', '4', '5').\n")
 cat("\nExample annotated rows:\n")
 print(utils::head(posMatchR::as_basic_site_table(ann), 10))
 

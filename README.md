@@ -101,9 +101,9 @@ The package preserves arbitrary existing metadata by default. It replaces only c
 sites <- load_sites("sacsGR.Rdat")
 
 # If needed, do simple organism-specific seqlevel handling in the script.
-# For example, Arabidopsis nuclear chromosomes:
-GenomeInfoDb::seqlevels(sites) <- sub("^([1-5])$", "Chr\\1", GenomeInfoDb::seqlevels(sites))
-sites <- GenomeInfoDb::keepSeqlevels(sites, paste0("Chr", 1:5), pruning.mode = "coarse")
+# For example, keep Arabidopsis nuclear chromosomes using TxDb-style names:
+GenomeInfoDb::seqlevels(sites) <- sub("^Chr([1-5])$", "\\1", GenomeInfoDb::seqlevels(sites))
+sites <- GenomeInfoDb::keepSeqlevels(sites, c("1", "2", "3", "4", "5"), pruning.mode = "coarse")
 
 bed_sites <- import_bed_sites("sites.bed")
 ```
@@ -112,19 +112,19 @@ bed_sites <- import_bed_sites("sites.bed")
 
 ## Arabidopsis k-mers with TAIR BSgenome
 
-`BSgenome.Athaliana.TAIR.TAIR9` uses `Chr1` to `Chr5`, `ChrM`, and `ChrC`, while some TxDb resources use `1` to `5`. Keep this explicit in the analysis script:
+`BSgenome.Athaliana.TAIR.TAIR9` uses `Chr1` to `Chr5`, `ChrM`, and `ChrC`, while `TxDb.Athaliana.BioMart.plantsmart51` uses `1` to `5`. A simple approach is to keep the TxDb convention and rename the in-memory genome/site seqlevels to match it:
 
 ```r
 library(BSgenome.Athaliana.TAIR.TAIR9)
 library(GenomeInfoDb)
 
 genome <- BSgenome.Athaliana.TAIR.TAIR9::Athaliana
-arab_chrs <- paste0("Chr", 1:5)
+GenomeInfoDb::seqlevels(genome) <- c("1", "2", "3", "4", "5", "Mt", "Pt")
+arab_chrs <- c("1", "2", "3", "4", "5")
 
 txdb <- TxDb.Athaliana.BioMart.plantsmart51::TxDb.Athaliana.BioMart.plantsmart51
-GenomeInfoDb::seqlevels(txdb) <- arab_chrs
 
-GenomeInfoDb::seqlevels(plant_sites) <- sub("^([1-5])$", "Chr\\1", GenomeInfoDb::seqlevels(plant_sites))
+GenomeInfoDb::seqlevels(plant_sites) <- sub("^Chr([1-5])$", "\\1", GenomeInfoDb::seqlevels(plant_sites))
 plant_sites <- GenomeInfoDb::keepSeqlevels(plant_sites, arab_chrs, pruning.mode = "coarse")
 
 ann <- annotate_sites(plant_sites, txdb = txdb, chrs = arab_chrs)

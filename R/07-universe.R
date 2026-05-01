@@ -61,6 +61,60 @@
   as.integer(IRanges::start(hits))
 }
 
+
+.can_use_pdict <- function(patterns, fixed = TRUE) {
+  if (!isTRUE(fixed)) return(FALSE)
+  patterns <- .iupac_to_plain(patterns)
+  if (!length(patterns)) return(FALSE)
+  if (!all(nchar(patterns) == nchar(patterns[1L]))) return(FALSE)
+  all(grepl("^[ACGT]+$", patterns))
+}
+
+.make_pdict <- function(patterns) {
+  if (!.can_use_pdict(patterns, fixed = TRUE)) return(NULL)
+  tryCatch(
+    Biostrings::PDict(Biostrings::DNAStringSet(patterns)),
+    error = function(e) NULL
+  )
+}
+
+.scan_pattern_positions <- function(sequence, patterns, fixed = TRUE, pdict = NULL) {
+  sequence <- .iupac_to_plain(sequence)
+  if (is.na(sequence) || !nzchar(sequence)) {
+    return(data.frame(pattern_i = integer(0), hit_start = integer(0)))
+  }
+
+  if (!is.null(pdict)) {
+    hits <- Biostrings::matchPDict(pdict, Biostrings::DNAString(sequence))
+    starts <- vector("list", length(patterns))
+    for (j in seq_along(patterns)) {
+      hj <- hits[[j]]
+      if (length(hj)) starts[[j]] <- as.integer(IRanges::start(hj))
+    }
+    lens <- vapply(starts, length, integer(1))
+    idx <- which(lens > 0L)
+    if (!length(idx)) return(data.frame(pattern_i = integer(0), hit_start = integer(0)))
+    return(data.frame(
+      pattern_i = rep(idx, lens[idx]),
+      hit_start = as.integer(unlist(starts[idx], use.names = FALSE))
+    ))
+  }
+
+  out <- vector("list", length(patterns))
+  n_out <- 0L
+  for (j in seq_along(patterns)) {
+    hits <- .scan_one_sequence(sequence, patterns[j], fixed = fixed)
+    if (!length(hits)) next
+    n_out <- n_out + 1L
+    out[[n_out]] <- data.frame(
+      pattern_i = rep.int(j, length(hits)),
+      hit_start = as.integer(hits)
+    )
+  }
+  if (!n_out) return(data.frame(pattern_i = integer(0), hit_start = integer(0)))
+  do.call(rbind, out[seq_len(n_out)])
+}
+
 .coord_key <- function(gr) {
   paste0(as.character(GenomicRanges::seqnames(gr)), ":", GenomicRanges::start(gr), ":", as.character(GenomicRanges::strand(gr)))
 }
@@ -109,6 +163,8 @@
     stop("Each `site_offset` must be between 1 and the corresponding pattern width.")
   }
 
+  pdict <- .make_pdict(patterns)
+
   tx_metrics <- as.data.frame(resources$tx_metrics, stringsAsFactors = FALSE)
   tx_key <- if (!is.null(resources$tx_key)) resources$tx_key else .tx_key_from_metrics(tx_metrics)
   gene_by_tx <- if ("gene_id" %in% colnames(tx_metrics)) {
@@ -138,47 +194,47 @@
         cum_end <- cumsum(widths)
         cum_start0 <- c(0L, cum_end[-length(cum_end)])
 
-        for (j in seq_along(patterns)) {
-          hits <- .scan_one_sequence(tx_seq, patterns[j], fixed = fixed)
-          if (!length(hits)) next
+        hit_df <- .scan_pattern_positions(tx_seq, patterns, fixed = fixed, pdict = pdict)
+        if (!nrow(hit_df)) next
 
-          tx_pos <- hits + site_offset[j] - 1L
-          ok <- tx_pos >= 1L & tx_pos <= cum_end[length(cum_end)]
-          if (!any(ok)) next
-          tx_pos <- as.integer(tx_pos[ok])
+        tx_pos <- hit_df$hit_start + site_offset[hit_df$pattern_i] - 1L
+        ok <- tx_pos >= 1L & tx_pos <= cum_end[length(cum_end)]
+        if (!any(ok)) next
+        tx_pos <- as.integer(tx_pos[ok])
+        pattern_i <- hit_df$pattern_i[ok]
 
-          exon_idx <- findInterval(tx_pos - 1L, cum_end) + 1L
-          ok_ex <- exon_idx >= 1L & exon_idx <= length(segs)
-          if (!any(ok_ex)) next
-          tx_pos <- tx_pos[ok_ex]
-          exon_idx <- exon_idx[ok_ex]
-          offset_within <- tx_pos - cum_start0[exon_idx]
-          ex <- segs[exon_idx]
-          st <- as.character(GenomicRanges::strand(ex))
-          st[is.na(st) | !nzchar(st)] <- "*"
+        exon_idx <- findInterval(tx_pos - 1L, cum_end) + 1L
+        ok_ex <- exon_idx >= 1L & exon_idx <= length(segs)
+        if (!any(ok_ex)) next
+        tx_pos <- tx_pos[ok_ex]
+        pattern_i <- pattern_i[ok_ex]
+        exon_idx <- exon_idx[ok_ex]
+        offset_within <- tx_pos - cum_start0[exon_idx]
+        ex <- segs[exon_idx]
+        st <- as.character(GenomicRanges::strand(ex))
+        st[is.na(st) | !nzchar(st)] <- "*"
 
-          pos <- ifelse(
-            st == "-",
-            GenomicRanges::end(ex) - offset_within + 1L,
-            GenomicRanges::start(ex) + offset_within - 1L
-          )
-          ok_pos <- is.finite(pos) & pos >= GenomicRanges::start(ex) & pos <= GenomicRanges::end(ex)
-          if (!any(ok_pos)) next
+        pos <- ifelse(
+          st == "-",
+          GenomicRanges::end(ex) - offset_within + 1L,
+          GenomicRanges::start(ex) + offset_within - 1L
+        )
+        ok_pos <- is.finite(pos) & pos >= GenomicRanges::start(ex) & pos <= GenomicRanges::end(ex)
+        if (!any(ok_pos)) next
 
-          gr <- GenomicRanges::GRanges(
-            seqnames = as.character(GenomicRanges::seqnames(ex[ok_pos])),
-            ranges = IRanges::IRanges(start = as.integer(pos[ok_pos]), width = 1L),
-            strand = st[ok_pos]
-          )
-          S4Vectors::mcols(gr)$candidate_pattern <- patterns[j]
-          S4Vectors::mcols(gr)$candidate_kmer <- patterns[j]
-          S4Vectors::mcols(gr)$candidate_type <- candidate_type
-          S4Vectors::mcols(gr)$candidate_region <- region
-          S4Vectors::mcols(gr)$candidate_tx_name <- tx
-          S4Vectors::mcols(gr)$candidate_gene_id <- gene_by_tx[tx]
-          out_i <- out_i + 1L
-          out[[out_i]] <- gr
-        }
+        gr <- GenomicRanges::GRanges(
+          seqnames = as.character(GenomicRanges::seqnames(ex[ok_pos])),
+          ranges = IRanges::IRanges(start = as.integer(pos[ok_pos]), width = 1L),
+          strand = st[ok_pos]
+        )
+        S4Vectors::mcols(gr)$candidate_pattern <- patterns[pattern_i[ok_pos]]
+        S4Vectors::mcols(gr)$candidate_kmer <- patterns[pattern_i[ok_pos]]
+        S4Vectors::mcols(gr)$candidate_type <- candidate_type
+        S4Vectors::mcols(gr)$candidate_region <- region
+        S4Vectors::mcols(gr)$candidate_tx_name <- tx
+        S4Vectors::mcols(gr)$candidate_gene_id <- gene_by_tx[tx]
+        out_i <- out_i + 1L
+        out[[out_i]] <- gr
         next
       }
 
@@ -189,35 +245,34 @@
         st <- as.character(GenomicRanges::strand(seg))
         if (is.na(st) || !nzchar(st)) st <- "*"
 
-        for (j in seq_along(patterns)) {
-          hits <- .scan_one_sequence(seq_i, patterns[j], fixed = fixed)
-          if (!length(hits)) next
+        hit_df <- .scan_pattern_positions(seq_i, patterns, fixed = fixed, pdict = pdict)
+        if (!nrow(hit_df)) next
 
-          offset0 <- hits + site_offset[j] - 2L
-          if (st == "-") {
-            pos <- GenomicRanges::end(seg) - offset0
-          } else {
-            pos <- GenomicRanges::start(seg) + offset0
-          }
-
-          ok <- is.finite(pos) & pos >= GenomicRanges::start(seg) & pos <= GenomicRanges::end(seg)
-          if (!any(ok)) next
-          pos <- as.integer(pos[ok])
-
-          gr <- GenomicRanges::GRanges(
-            seqnames = as.character(GenomicRanges::seqnames(seg)),
-            ranges = IRanges::IRanges(start = pos, width = 1L),
-            strand = st
-          )
-          S4Vectors::mcols(gr)$candidate_pattern <- patterns[j]
-          S4Vectors::mcols(gr)$candidate_kmer <- patterns[j]
-          S4Vectors::mcols(gr)$candidate_type <- candidate_type
-          S4Vectors::mcols(gr)$candidate_region <- region
-          S4Vectors::mcols(gr)$candidate_tx_name <- tx
-          S4Vectors::mcols(gr)$candidate_gene_id <- gene_by_tx[tx]
-          out_i <- out_i + 1L
-          out[[out_i]] <- gr
+        offset0 <- hit_df$hit_start + site_offset[hit_df$pattern_i] - 2L
+        if (st == "-") {
+          pos <- GenomicRanges::end(seg) - offset0
+        } else {
+          pos <- GenomicRanges::start(seg) + offset0
         }
+
+        ok <- is.finite(pos) & pos >= GenomicRanges::start(seg) & pos <= GenomicRanges::end(seg)
+        if (!any(ok)) next
+        pos <- as.integer(pos[ok])
+        pattern_i <- hit_df$pattern_i[ok]
+
+        gr <- GenomicRanges::GRanges(
+          seqnames = as.character(GenomicRanges::seqnames(seg)),
+          ranges = IRanges::IRanges(start = pos, width = 1L),
+          strand = st
+        )
+        S4Vectors::mcols(gr)$candidate_pattern <- patterns[pattern_i]
+        S4Vectors::mcols(gr)$candidate_kmer <- patterns[pattern_i]
+        S4Vectors::mcols(gr)$candidate_type <- candidate_type
+        S4Vectors::mcols(gr)$candidate_region <- region
+        S4Vectors::mcols(gr)$candidate_tx_name <- tx
+        S4Vectors::mcols(gr)$candidate_gene_id <- gene_by_tx[tx]
+        out_i <- out_i + 1L
+        out[[out_i]] <- gr
       }
     }
   }
