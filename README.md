@@ -176,8 +176,12 @@ random_gene <- match_random_background(combined, group_col = "gene_id", kmer_mat
 
 # More constrained matcher: same region/k-mer plus metagene and distance covariates.
 matched <- match_background(combined, kmer_match = TRUE, bin_match = TRUE)
-plot_metagene_density(matched, set_col = "match_set")
-plot_junction_distance_density(matched, set_col = "match_set")
+
+# Diagnostic plots should be made on the matched positive/background rows only.
+matched_sets <- subset_matched_sets(matched)
+plot_metagene_density(matched_sets, set_col = "match_set")
+plot_junction_distance_density(matched_sets, set_col = "match_set")
+plot_kmer_counts(matched_sets, set_col = "match_set", top_n = 25)
 ```
 
 ## Compact output tables
@@ -193,4 +197,35 @@ If you are finished with matching and plotting and want a compact `GRanges`, use
 
 ```r
 compact_ann <- compact_site_mcols(ann)
+```
+
+## Motif enrichment around matched sites
+
+`plot_motif_enrichment()` counts motif hits in windows centred on the input sites and plots the profile around position 0. Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA `U` is converted to DNA `T`. Objects from the `universalmotif` package can also be supplied when PWM/log-odds scanning is needed.
+
+```r
+matched_sets <- subset_matched_sets(matched)
+
+plot_motif_enrichment(
+  matched_sets,
+  genome = genome,
+  motif = c(PUM_PRE = "TGTANATA", ARE_AUUUA = "ATTTA"),
+  window = 250,
+  set_col = "match_set",
+  hit_position = "center",
+  smooth_window = 11
+)
+
+if (requireNamespace("universalmotif", quietly = TRUE)) {
+  pum <- universalmotif::create_motif("TGTANATA", alphabet = "DNA", name = "PUM_PRE")
+  plot_motif_enrichment(
+    matched_sets,
+    genome = genome,
+    motif = pum,
+    method = "universalmotif",
+    motif_name = "PUM_PRE",
+    window = 250,
+    set_col = "match_set"
+  )
+}
 ```

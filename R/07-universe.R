@@ -543,7 +543,16 @@ match_random_background <- function(gr,
   mc$matched_positive_id <- matched_pos_for_neg
   mc$meta_delta <- meta_delta
   mc$is_matched_negative <- as.integer(neg_used)
-  mc$match_set <- ifelse(mc$is_positive == 1L, "positive", ifelse(mc$is_matched_negative == 1L, "matched_negative", "other"))
+  mc$is_matched_positive <- as.integer(!is.na(matched_neg_for_pos))
+  mc$match_set <- ifelse(
+    mc$is_matched_positive == 1L,
+    "positive",
+    ifelse(
+      mc$is_positive == 1L,
+      "unmatched_positive",
+      ifelse(mc$is_matched_negative == 1L, "matched_negative", "other")
+    )
+  )
   S4Vectors::mcols(gr) <- mc
 
   if (return_diagnostics) {

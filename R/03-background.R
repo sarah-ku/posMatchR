@@ -288,11 +288,17 @@ match_background <- function(gr,
   mc$meta_delta <- match_meta_delta
 
   matched_neg_idx <- which(!is.na(matched_pos_for_neg))
+  matched_pos_idx <- which(!is.na(matched_neg_for_pos))
   mc$is_matched_negative <- as.integer(seq_along(gr) %in% matched_neg_idx)
+  mc$is_matched_positive <- as.integer(seq_along(gr) %in% matched_pos_idx)
   mc$match_set <- ifelse(
-    mc$is_positive == 1L,
+    mc$is_matched_positive == 1L,
     "positive",
-    ifelse(mc$is_matched_negative == 1L, "matched_negative", "other")
+    ifelse(
+      mc$is_positive == 1L,
+      "unmatched_positive",
+      ifelse(mc$is_matched_negative == 1L, "matched_negative", "other")
+    )
   )
 
   S4Vectors::mcols(gr) <- mc
@@ -451,6 +457,22 @@ subset_matched_pairs <- function(gr,
   }
 
   out
+}
+
+#' Subset to matched positive/background rows
+#'
+#' Convenience alias for \code{\link{subset_matched_pairs}}. This is the
+#' object that should usually be passed to matched-set diagnostic plots.
+#'
+#' @param gr A \code{GRanges} returned by \code{match_background()} or
+#'   \code{match_random_background()}.
+#' @param ... Passed to \code{\link{subset_matched_pairs}}.
+#'
+#' @return A paired \code{GRanges} containing only matched positives and their
+#'   selected matched negatives.
+#' @export
+subset_matched_sets <- function(gr, ...) {
+  subset_matched_pairs(gr, ...)
 }
 
 #' Assign train/test/validation split by chromosome
