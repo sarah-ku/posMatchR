@@ -1,16 +1,22 @@
 Package: posMatchR
 Type: Package
-Title: Annotate Sites and Build Matched Backgrounds for DRACH/m6A Analyses
-Version: 0.0.0.9000
-Authors@R: 
-    person("Sarah", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: Tools to annotate genomic sites with transcript context and to
-    construct matched or within-transcript background sets for DRACH/m6A analyses.
+Title: Annotate Single-Nucleotide RNA Sites and Build Matched Backgrounds
+Version: 0.1.0
+Authors@R: person("Sarah", "Ku", email = "sarah.b.rennie@gmail.com", role = c("aut", "cre"))
+Description: Tools for annotating single-nucleotide GRanges objects with transcript, gene,
+    region, metagene, sequence-context, and feature-distance variables, and for constructing
+    matched background sets for post-transcriptional site analyses such as RNA modifications,
+    RNA editing, and RBP binding-site maps.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
+Depends:
+    R (>= 4.2)
 Imports:
+    methods,
+    stats,
+    utils,
     GenomicRanges,
     GenomicFeatures,
     VariantAnnotation,
@@ -18,18 +24,19 @@ Imports:
     IRanges,
     GenomeInfoDb,
     Biostrings,
-    ggplot2,
-    rlang,
-    eulerr
+    ggplot2
 Suggests:
     AnnotationDbi,
+    BSgenome,
     TxDb.Hsapiens.UCSC.hg38.knownGene,
+    TxDb.Athaliana.BioMart.plantsmart51,
     BSgenome.Hsapiens.UCSC.hg38,
-    BiocManager,
-    gridExtra,
+    BSgenome.Athaliana.TAIR.TAIR9,
+    org.Hs.eg.db,
+    org.At.tair.db,
+    testthat (>= 3.0.0),
     knitr,
-    rmarkdown,
-    testthat (>= 3.0.0)
+    rmarkdown
 Config/testthat/edition: 3
 URL: https://github.com/sarah-ku/posMatchR
 BugReports: https://github.com/sarah-ku/posMatchR/issues

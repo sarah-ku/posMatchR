@@ -1,3 +1,7 @@
-^posMatchR\.Rproj$
+^.*\.Rproj$
 ^\.Rproj\.user$
-^LICENSE\.md$
+^\.git$
+^\.gitignore$
+^README_files$
+^doc$
+^Meta$
