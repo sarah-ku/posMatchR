@@ -57,4 +57,29 @@ test_that("motif_enrichment_profile can omit edge positions", {
   )
 
   expect_false(any(prof$relative_position %in% c(-10, 10)))
+
+  prof2 <- motif_enrichment_profile(
+    gr,
+    genome = genome,
+    motif = "A",
+    window = 10,
+    smooth_window = 1,
+    edge_trim = 3
+  )
+
+  expect_false(any(prof2$relative_position %in% c(-10, -9, -8, 8, 9, 10)))
+  expect_true(all(c(-7, 0, 7) %in% prof2$relative_position))
+
+  prof3 <- motif_enrichment_profile(
+    gr,
+    genome = genome,
+    motif = "A",
+    window = 10,
+    smooth_window = 1,
+    center_exclude = 2
+  )
+
+  expect_false(any(prof3$relative_position %in% -2:2))
+  expect_true(all(c(-3, 3) %in% prof3$relative_position))
+
 })

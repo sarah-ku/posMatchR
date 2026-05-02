@@ -1,7 +1,7 @@
 Package: posMatchR
 Type: Package
 Title: Annotate Single-Nucleotide RNA Sites and Build Matched Backgrounds
-Version: 0.1.5
+Version: 0.1.6
 Authors@R: person("Sarah", "Ku", email = "sarah.ku@example.com", role = c("aut", "cre"))
 Description: Tools for annotating single-nucleotide GRanges objects with transcript, gene,
     region, metagene, sequence-context, and feature-distance variables, and for constructing
@@ -10,7 +10,6 @@ Description: Tools for annotating single-nucleotide GRanges objects with transcr
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 Depends:
     R (>= 4.2)
 Imports:
@@ -42,3 +41,4 @@ Suggests:
 Config/testthat/edition: 3
 URL: https://github.com/sarah-ku/posMatchR
 BugReports: https://github.com/sarah-ku/posMatchR/issues
+Config/roxygen2/version: 8.0.0

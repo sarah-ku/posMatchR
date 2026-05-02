@@ -236,6 +236,20 @@
   bins[idx]
 }
 
+.posmatchr_edge_trim <- function(drop_edge_positions = FALSE, edge_trim = NULL) {
+  if (!is.null(edge_trim)) {
+    out <- as.integer(edge_trim[1L])
+  } else if (is.numeric(drop_edge_positions) && !is.logical(drop_edge_positions)) {
+    out <- as.integer(drop_edge_positions[1L])
+  } else if (isTRUE(drop_edge_positions)) {
+    out <- 2L
+  } else {
+    out <- 0L
+  }
+  if (!is.finite(out) || out < 0L) stop("`edge_trim` must be a non-negative integer.")
+  out
+}
+
 #' Compute a motif-enrichment profile around single-nucleotide sites
 #'
 #' Counts motif hits in strand-oriented windows centred on each site and returns
@@ -270,9 +284,18 @@
 #' @param chrs Optional seqlevels to keep for sequence extraction.
 #' @param drop_unstranded If TRUE, omit sites on '*' strand because RNA-oriented
 #'   motif profiles require a transcript strand.
-#' @param drop_edge_positions If TRUE, omit the extreme -window and +window
-#'   positions from the profile. This avoids artificial zero-valued edge bins
-#'   from full-width sequence extraction while keeping the plotted axis at +/-window.
+#' @param drop_edge_positions Logical or integer. If TRUE, omit edge positions
+#'   from the profile; if FALSE, keep them. For backward compatibility, an integer
+#'   value is interpreted as the number of bp to trim from each edge.
+#' @param edge_trim Integer number of bp to omit from each edge of the profile.
+#'   For example, with `window = 250` and `edge_trim = 2`, positions -250, -249,
+#'   249, and 250 are omitted from the plotted/profile data while the plot axis
+#'   can still display -250 and 250. If NULL, it is inferred from
+#'   `drop_edge_positions`.
+#' @param center_exclude Integer number of bp around the central site to omit
+#'   from the profile. For example, `center_exclude = 10` removes positions -10
+#'   through +10. This is useful when the direct modification motif should not
+#'   dominate a flanking motif-enrichment display.
 #'
 #' @return A data.frame with relative position, group, motif, counts, site counts,
 #'   and hits per site.
@@ -298,7 +321,9 @@ motif_enrichment_profile <- function(gr,
                                      seqstyle = NULL,
                                      chrs = NULL,
                                      drop_unstranded = TRUE,
-                                     drop_edge_positions = FALSE) {
+                                     drop_edge_positions = FALSE,
+                                     edge_trim = NULL,
+                                     center_exclude = 0L) {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   method <- match.arg(method)
   method <- .posmatchr_motif_method(motif, method)
@@ -306,6 +331,11 @@ motif_enrichment_profile <- function(gr,
   window <- as.integer(window)
   bin_size <- as.integer(bin_size)
   smooth_window <- as.integer(smooth_window)
+  edge_trim <- .posmatchr_edge_trim(drop_edge_positions = drop_edge_positions, edge_trim = edge_trim)
+  if (edge_trim >= window) stop("`edge_trim` must be smaller than `window`.")
+  center_exclude <- as.integer(center_exclude[1L])
+  if (!is.finite(center_exclude) || center_exclude < 0L) stop("`center_exclude` must be a non-negative integer.")
+  if (center_exclude >= window) stop("`center_exclude` must be smaller than `window`.")
 
   if (matched_only && all(c("matched_negative_id", "matched_positive_id") %in% colnames(S4Vectors::mcols(gr)))) {
     gr <- subset_matched_pairs(gr, return_diagnostics = FALSE)
@@ -368,7 +398,12 @@ motif_enrichment_profile <- function(gr,
   group_levels <- unique(group_valid)
   positions <- seq(-window, window, by = bin_size)
   if (!length(positions) || tail(positions, 1L) != window) positions <- unique(c(positions, window))
-  if (isTRUE(drop_edge_positions)) positions <- positions[positions > -window & positions < window]
+  if (edge_trim > 0L) {
+    positions <- positions[positions >= (-window + edge_trim) & positions <= (window - edge_trim)]
+  }
+  if (center_exclude > 0L) {
+    positions <- positions[abs(positions) > center_exclude]
+  }
 
   n_sites <- as.data.frame(table(group = group_valid), stringsAsFactors = FALSE)
   names(n_sites) <- c("group", "n_sites")
@@ -384,8 +419,11 @@ motif_enrichment_profile <- function(gr,
   if (nrow(hits)) {
     hits <- merge(hits, site_lookup, by = "site_name", all.x = FALSE, all.y = FALSE)
     hits <- hits[is.finite(hits$relative_position) & hits$relative_position >= -window & hits$relative_position <= window, , drop = FALSE]
-    if (isTRUE(drop_edge_positions) && nrow(hits)) {
-      hits <- hits[hits$relative_position > -window & hits$relative_position < window, , drop = FALSE]
+    if (edge_trim > 0L && nrow(hits)) {
+      hits <- hits[hits$relative_position >= (-window + edge_trim) & hits$relative_position <= (window - edge_trim), , drop = FALSE]
+    }
+    if (center_exclude > 0L && nrow(hits)) {
+      hits <- hits[abs(hits$relative_position) > center_exclude, , drop = FALSE]
     }
     if (nrow(hits)) {
       hits$relative_position <- .posmatchr_bin_relative_positions(hits$relative_position, window = window, bin_size = bin_size)
@@ -458,6 +496,8 @@ plot_motif_enrichment <- function(gr,
                                   chrs = NULL,
                                   drop_unstranded = TRUE,
                                   drop_edge_positions = TRUE,
+                                  edge_trim = NULL,
+                                  center_exclude = 0L,
                                   y = c("hits_per_site_smoothed", "hits_per_site", "count"),
                                   x_label = "Distance from site centre (bp)",
                                   y_label = NULL) {
@@ -486,12 +526,19 @@ plot_motif_enrichment <- function(gr,
     seqstyle = seqstyle,
     chrs = chrs,
     drop_unstranded = drop_unstranded,
-    drop_edge_positions = drop_edge_positions
+    drop_edge_positions = drop_edge_positions,
+    edge_trim = edge_trim,
+    center_exclude = center_exclude
   )
   prof$y_plot <- prof[[y]]
+  if (center_exclude > 0L) {
+    prof$plot_segment <- ifelse(prof$relative_position < 0, "left", "right")
+  } else {
+    prof$plot_segment <- "all"
+  }
   ylab <- y_label %||% if (y == "count") "Motif-hit count" else "Motif hits per site"
 
-  p <- ggplot2::ggplot(prof, ggplot2::aes(x = relative_position, y = y_plot, colour = group, linetype = motif)) +
+  p <- ggplot2::ggplot(prof, ggplot2::aes(x = relative_position, y = y_plot, colour = group, linetype = motif, group = interaction(group, motif, plot_segment))) +
     ggplot2::geom_line(linewidth = 1, na.rm = TRUE) +
     ggplot2::geom_vline(xintercept = 0, linetype = 2) +
     ggplot2::scale_x_continuous(limits = c(-window, window), breaks = unique(c(-window, -round(window / 2), 0, round(window / 2), window))) +

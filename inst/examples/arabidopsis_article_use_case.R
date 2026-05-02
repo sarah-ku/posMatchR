@@ -276,7 +276,9 @@ for (nm in names(matched_objects)) {
       smooth_window = 11,
       scan_rc = FALSE,
       chrs = arab_chrs,
-      drop_edge_positions = TRUE
+      drop_edge_positions = TRUE,
+      edge_trim = 2L,
+      center_exclude = 10L
     ),
     paste0("07_", nm, "_UNUNU_motif_enrichment_250bp.pdf"),
     width = 7,

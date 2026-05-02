@@ -27,6 +27,8 @@ plot_motif_enrichment(
   chrs = NULL,
   drop_unstranded = TRUE,
   drop_edge_positions = TRUE,
+  edge_trim = NULL,
+  center_exclude = 0L,
   y = c("hits_per_site_smoothed", "hits_per_site", "count"),
   x_label = "Distance from site centre (bp)",
   y_label = NULL
@@ -79,9 +81,20 @@ for strand-oriented transcript/RNA motifs.}
 \item{drop_unstranded}{If TRUE, omit sites on '*' strand because RNA-oriented
 motif profiles require a transcript strand.}
 
-\item{drop_edge_positions}{If TRUE, omit the extreme -window and +window
-positions from the profile. This avoids artificial zero-valued edge bins
-from full-width sequence extraction while keeping the plotted axis at +/-window.}
+\item{drop_edge_positions}{Logical or integer. If TRUE, omit edge positions
+from the profile; if FALSE, keep them. For backward compatibility, an integer
+value is interpreted as the number of bp to trim from each edge.}
+
+\item{edge_trim}{Integer number of bp to omit from each edge of the profile.
+For example, with \code{window = 250} and \code{edge_trim = 2}, positions -250, -249,
+249, and 250 are omitted from the plotted/profile data while the plot axis
+can still display -250 and 250. If NULL, it is inferred from
+\code{drop_edge_positions}.}
+
+\item{center_exclude}{Integer number of bp around the central site to omit
+from the profile. For example, \code{center_exclude = 10} removes positions -10
+through +10. This is useful when the direct modification motif should not
+dominate a flanking motif-enrichment display.}
 
 \item{y}{Value to plot: \code{"hits_per_site"}, \code{"hits_per_site_smoothed"}, or \code{"count"}.}
 
