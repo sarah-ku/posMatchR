@@ -75,3 +75,32 @@ test_that("basic site table is compact", {
   expect_false("tx_len" %in% colnames(tab_basic))
   expect_true("nearest_exon_junction_dist" %in% colnames(tab_basic))
 })
+
+test_that("match_random_background can optionally preserve location", {
+  skip_if_not_installed("GenomicRanges")
+  skip_if_not_installed("IRanges")
+
+  gr <- GenomicRanges::GRanges(
+    seqnames = rep("chr1", 6),
+    ranges = IRanges::IRanges(start = seq(10, 60, by = 10), width = 1),
+    strand = rep("+", 6)
+  )
+  names(gr) <- paste0("r", seq_along(gr))
+  S4Vectors::mcols(gr)$label <- c(1, 1, 0, 0, 0, 0)
+  S4Vectors::mcols(gr)$gene_id <- rep("g1", 6)
+  S4Vectors::mcols(gr)$location <- c("coding", "threeUTR", "coding", "coding", "threeUTR", "threeUTR")
+
+  out <- match_random_background(
+    gr,
+    group_col = "gene_id",
+    match_location = TRUE,
+    seed = 1L
+  )
+  paired <- subset_matched_sets(out)
+
+  mc <- S4Vectors::mcols(out)
+  pos_idx <- which(mc$label == 1L & !is.na(mc$matched_negative_id))
+  neg_idx <- match(as.character(mc$matched_negative_id[pos_idx]), names(out))
+  expect_true(all(as.character(mc$location[pos_idx]) == as.character(mc$location[neg_idx])))
+  expect_equal(length(paired), 4L)
+})

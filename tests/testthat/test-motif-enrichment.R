@@ -34,3 +34,27 @@ test_that("motif_enrichment_profile and plot_motif_enrichment work on a tiny gen
   )
   expect_s3_class(p, "gg")
 })
+
+test_that("motif_enrichment_profile can omit edge positions", {
+  skip_if_not_installed("Biostrings")
+
+  seq <- paste(rep("A", 101), collapse = "")
+  genome <- Biostrings::DNAStringSet(c(chr1 = seq))
+  gr <- GenomicRanges::GRanges(
+    seqnames = "chr1",
+    ranges = IRanges::IRanges(start = 51, width = 1),
+    strand = "+"
+  )
+  S4Vectors::mcols(gr)$match_set <- "positive"
+
+  prof <- motif_enrichment_profile(
+    gr,
+    genome = genome,
+    motif = "A",
+    window = 10,
+    smooth_window = 1,
+    drop_edge_positions = TRUE
+  )
+
+  expect_false(any(prof$relative_position %in% c(-10, 10)))
+})

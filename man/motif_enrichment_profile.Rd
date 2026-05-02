@@ -24,7 +24,9 @@ motif_enrichment_profile(
   bin_size = 1L,
   smooth_window = 1L,
   seqstyle = NULL,
-  chrs = NULL
+  chrs = NULL,
+  drop_unstranded = TRUE,
+  drop_edge_positions = FALSE
 )
 }
 \arguments{
@@ -70,6 +72,13 @@ for strand-oriented transcript/RNA motifs.}
 \item{seqstyle}{Optional seqlevel style passed to the internal sequence-extraction step.}
 
 \item{chrs}{Optional seqlevels to keep for sequence extraction.}
+
+\item{drop_unstranded}{If TRUE, omit sites on '*' strand because RNA-oriented
+motif profiles require a transcript strand.}
+
+\item{drop_edge_positions}{If TRUE, omit the extreme -window and +window
+positions from the profile. This avoids artificial zero-valued edge bins
+from full-width sequence extraction while keeping the plotted axis at +/-window.}
 }
 \value{
 A data.frame with relative position, group, motif, counts, site counts,
@@ -77,7 +86,9 @@ and hits per site.
 }
 \description{
 Counts motif hits in strand-oriented windows centred on each site and returns
-a per-position profile. Character motifs are treated as exact/IUPAC DNA or RNA
-patterns; RNA U is converted to DNA T. Objects from the
+a per-position profile. Windows are extracted in transcript/RNA orientation:
+negative-strand sites are reverse-complemented by the sequence extraction step.
+Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA U is
+converted to DNA T. Objects from the
 universalmotif package are scanned with \code{universalmotif::scan_sequences()}.
 }

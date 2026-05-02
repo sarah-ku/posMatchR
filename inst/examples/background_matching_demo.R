@@ -57,10 +57,23 @@ combined <- combine_site_sets(
 combined <- annotate_sites(combined, txdb = txdb, tx_select = "longest", resources = resources)
 combined <- add_kmer(combined, genome = genome, k = 5)
 
-# Baseline: random within gene, with exact k-mer matching.
+# Baseline 1: random within gene and broad transcript region.
+random_gene_region <- match_random_background(
+  combined,
+  group_col = "gene_id",
+  match_location = TRUE,
+  locations = c("fiveUTR", "coding", "threeUTR"),
+  kmer_match = FALSE,
+  seed = 1L
+)
+random_gene_region_sets <- subset_matched_sets(random_gene_region)
+
+# Baseline 2: random within gene, broad transcript region, and exact k-mer.
 random_gene_kmer <- match_random_background(
   combined,
   group_col = "gene_id",
+  match_location = TRUE,
+  locations = c("fiveUTR", "coding", "threeUTR"),
   kmer_match = TRUE,
   seed = 1L
 )
@@ -90,6 +103,9 @@ matched_covariate_no_kmer <- match_background(
 )
 matched_covariate_no_kmer_sets <- subset_matched_sets(matched_covariate_no_kmer)
 
+plot_metagene_density(random_gene_region_sets, set_col = "match_set")
+plot_junction_distance_density(random_gene_region_sets, set_col = "match_set")
+
 plot_metagene_density(random_gene_kmer_sets, set_col = "match_set")
 plot_junction_distance_density(random_gene_kmer_sets, set_col = "match_set")
 plot_kmer_counts(random_gene_kmer_sets, set_col = "match_set", top_n = 25)
@@ -101,6 +117,7 @@ plot_kmer_counts(matched_covariate_sets, set_col = "match_set", top_n = 25)
 plot_metagene_density(matched_covariate_no_kmer_sets, set_col = "match_set")
 plot_junction_distance_density(matched_covariate_no_kmer_sets, set_col = "match_set")
 
+S4Vectors::metadata(random_gene_region)$match_diagnostics
 S4Vectors::metadata(random_gene_kmer)$match_diagnostics
 S4Vectors::metadata(matched_covariate)$match_diagnostics
 S4Vectors::metadata(matched_covariate_no_kmer)$match_diagnostics

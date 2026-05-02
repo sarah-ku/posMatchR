@@ -159,6 +159,90 @@
   do.call(rbind, out[seq_len(n_out)])
 }
 
+.scan_exact_kmer_segments <- function(segs,
+                                      seqs,
+                                      tx_for_seg,
+                                      region,
+                                      patterns,
+                                      site_offset,
+                                      gene_by_tx,
+                                      candidate_type) {
+  patterns <- .iupac_to_plain(patterns)
+  if (!.can_use_pdict(patterns, fixed = TRUE)) {
+    stop("Internal error: .scan_exact_kmer_segments requires exact same-width A/C/G/T patterns.")
+  }
+
+  widths <- nchar(seqs)
+  keep <- !is.na(seqs) & nzchar(seqs) & is.finite(widths) & widths > 0L
+  if (!any(keep)) return(GenomicRanges::GRanges())
+
+  segs <- segs[keep]
+  seqs <- .iupac_to_plain(seqs[keep])
+  tx_for_seg <- tx_for_seg[keep]
+  widths <- as.integer(widths[keep])
+
+  k_width <- as.integer(nchar(patterns[1L]))
+  sep_len <- k_width
+  sep <- paste(rep("N", sep_len), collapse = "")
+
+  seg_start <- integer(length(widths))
+  seg_start[1L] <- 1L
+  if (length(widths) > 1L) {
+    seg_start[-1L] <- 1L + cumsum(widths[-length(widths)] + sep_len)
+  }
+  seg_end <- seg_start + widths - 1L
+
+  combined <- paste0(seqs, collapse = sep)
+  hit_df <- .scan_exact_kmer_positions(combined, patterns)
+  if (!nrow(hit_df)) return(GenomicRanges::GRanges())
+
+  hit_start <- as.integer(hit_df$hit_start)
+  hit_end <- hit_start + k_width - 1L
+  seg_idx <- findInterval(hit_start, seg_start)
+  ok <- seg_idx >= 1L & seg_idx <= length(segs) &
+    hit_start >= seg_start[seg_idx] & hit_end <= seg_end[seg_idx]
+  if (!any(ok)) return(GenomicRanges::GRanges())
+
+  hit_start <- hit_start[ok]
+  seg_idx <- seg_idx[ok]
+  pattern_i <- as.integer(hit_df$pattern_i[ok])
+  tx <- tx_for_seg[seg_idx]
+  seg_hit <- segs[seg_idx]
+
+  offset0 <- hit_start - seg_start[seg_idx] + site_offset[pattern_i] - 1L
+  st <- as.character(GenomicRanges::strand(seg_hit))
+  st[is.na(st) | !nzchar(st)] <- "*"
+
+  pos <- ifelse(
+    st == "-",
+    GenomicRanges::end(seg_hit) - offset0,
+    GenomicRanges::start(seg_hit) + offset0
+  )
+  ok_pos <- is.finite(pos) &
+    pos >= GenomicRanges::start(seg_hit) &
+    pos <= GenomicRanges::end(seg_hit)
+  if (!any(ok_pos)) return(GenomicRanges::GRanges())
+
+  pattern_i <- pattern_i[ok_pos]
+  tx <- tx[ok_pos]
+  seg_hit <- seg_hit[ok_pos]
+  st <- st[ok_pos]
+  pos <- as.integer(pos[ok_pos])
+
+  gr <- GenomicRanges::GRanges(
+    seqnames = as.character(GenomicRanges::seqnames(seg_hit)),
+    ranges = IRanges::IRanges(start = pos, width = 1L),
+    strand = st
+  )
+  S4Vectors::mcols(gr)$candidate_pattern <- patterns[pattern_i]
+  S4Vectors::mcols(gr)$candidate_kmer <- patterns[pattern_i]
+  S4Vectors::mcols(gr)$candidate_type <- candidate_type
+  S4Vectors::mcols(gr)$candidate_region <- region
+  S4Vectors::mcols(gr)$candidate_tx_name <- tx
+  S4Vectors::mcols(gr)$candidate_gene_id <- gene_by_tx[tx]
+  gr
+}
+
 .coord_key <- function(gr) {
   paste0(as.character(GenomicRanges::seqnames(gr)), ":", GenomicRanges::start(gr), ":", as.character(GenomicRanges::strand(gr)))
 }
@@ -232,6 +316,24 @@
       tx_for_seg <- rep(names(gl), seg_n)
       segs_all <- unlist(gl, use.names = FALSE)
       seqs_all <- as.character(Biostrings::getSeq(genome, segs_all))
+
+      if (.can_use_pdict(patterns, fixed = fixed)) {
+        gr_region <- .scan_exact_kmer_segments(
+          segs = segs_all,
+          seqs = seqs_all,
+          tx_for_seg = tx_for_seg,
+          region = region,
+          patterns = patterns,
+          site_offset = site_offset,
+          gene_by_tx = gene_by_tx,
+          candidate_type = candidate_type
+        )
+        if (length(gr_region)) {
+          out_i <- out_i + 1L
+          out[[out_i]] <- gr_region
+        }
+        next
+      }
 
       for (i in seq_along(segs_all)) {
         tx <- tx_for_seg[[i]]
@@ -516,8 +618,13 @@ make_motif_universe <- function(foreground,
 #' @param group_col Metadata column used to constrain matching, e.g. \code{"gene_id"}.
 #' @param kmer_match If TRUE, match within \code{group_col} and \code{kmer_col}.
 #' @param kmer_col K-mer column used when \code{kmer_match = TRUE}.
+#' @param match_location If TRUE, additionally require positives and negatives to
+#'   have the same \code{location_col}. This is useful when the simple random
+#'   baseline should preserve broad transcript region, e.g. 5'UTR/CDS/3'UTR.
 #' @param location_col Optional location column.
 #' @param locations Optional location classes eligible for matching.
+#' @param match_cols Additional metadata columns to append to the matching key,
+#'   for example \code{"region_class"} or \code{"type"}.
 #' @param seed Random seed.
 #' @param return_diagnostics If TRUE, attach diagnostics to metadata.
 #'
@@ -528,8 +635,10 @@ match_random_background <- function(gr,
                                     group_col = "gene_id",
                                     kmer_match = FALSE,
                                     kmer_col = "kmer",
+                                    match_location = FALSE,
                                     location_col = "location",
                                     locations = NULL,
+                                    match_cols = NULL,
                                     seed = 1L,
                                     return_diagnostics = TRUE) {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
@@ -538,6 +647,11 @@ match_random_background <- function(gr,
   if (!(label_col %in% colnames(mc))) stop("Missing label_col: ", label_col)
   if (!(group_col %in% colnames(mc))) stop("Missing group_col: ", group_col)
   if (kmer_match && !(kmer_col %in% colnames(mc))) stop("kmer_match=TRUE but missing kmer_col: ", kmer_col)
+  if (isTRUE(match_location) && !(location_col %in% colnames(mc))) stop("match_location=TRUE but missing location_col: ", location_col)
+  if (!is.null(match_cols)) {
+    missing_cols <- setdiff(as.character(match_cols), colnames(mc))
+    if (length(missing_cols)) stop("Missing match_cols: ", paste(missing_cols, collapse = ", "))
+  }
 
   y <- .normalise_binary_label(mc[[label_col]], strict = TRUE)
   mc[[label_col]] <- y
@@ -550,12 +664,27 @@ match_random_background <- function(gr,
 
   group <- as.character(mc[[group_col]])
   group[is.na(group) | !nzchar(group)] <- NA_character_
+
+  append_to_group <- function(group, value) {
+    value <- as.character(value)
+    value[is.na(value) | !nzchar(value)] <- NA_character_
+    out <- paste0(group, "||", value)
+    out[is.na(group) | is.na(value)] <- NA_character_
+    out
+  }
+
+  if (isTRUE(match_location)) {
+    group <- append_to_group(group, mc[[location_col]])
+  }
+
+  if (!is.null(match_cols) && length(match_cols)) {
+    for (cl in as.character(match_cols)) {
+      group <- append_to_group(group, mc[[cl]])
+    }
+  }
+
   if (kmer_match) {
-    base_group <- group
-    km <- .iupac_to_plain(as.character(mc[[kmer_col]]))
-    km[is.na(km) | !nzchar(km)] <- NA_character_
-    group <- paste0(base_group, "||", km)
-    group[is.na(base_group) | is.na(km)] <- NA_character_
+    group <- append_to_group(group, .iupac_to_plain(as.character(mc[[kmer_col]])))
   }
 
   eligible <- eligible & !is.na(group)
@@ -611,6 +740,9 @@ match_random_background <- function(gr,
       method = "random_within_group",
       group_col = group_col,
       kmer_match = kmer_match,
+      match_location = isTRUE(match_location),
+      location_col = location_col,
+      match_cols = match_cols,
       n_positive = length(pos_idx),
       n_negative = length(neg_idx),
       n_matched_positive = sum(!is.na(matched_neg_for_pos)),

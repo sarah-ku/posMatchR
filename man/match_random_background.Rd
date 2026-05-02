@@ -10,8 +10,10 @@ match_random_background(
   group_col = "gene_id",
   kmer_match = FALSE,
   kmer_col = "kmer",
+  match_location = FALSE,
   location_col = "location",
   locations = NULL,
+  match_cols = NULL,
   seed = 1L,
   return_diagnostics = TRUE
 )
@@ -27,9 +29,16 @@ match_random_background(
 
 \item{kmer_col}{K-mer column used when \code{kmer_match = TRUE}.}
 
+\item{match_location}{If TRUE, additionally require positives and negatives to
+have the same \code{location_col}. This is useful when the simple random
+baseline should preserve broad transcript region, e.g. 5'UTR/CDS/3'UTR.}
+
 \item{location_col}{Optional location column.}
 
 \item{locations}{Optional location classes eligible for matching.}
+
+\item{match_cols}{Additional metadata columns to append to the matching key,
+for example \code{"region_class"} or \code{"type"}.}
 
 \item{seed}{Random seed.}
 

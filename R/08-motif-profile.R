@@ -52,10 +52,17 @@
   "universalmotif"
 }
 
-.posmatchr_prepare_motif_windows <- function(gr, genome, window, seqstyle = NULL, chrs = NULL) {
+.posmatchr_prepare_motif_windows <- function(gr, genome, window, seqstyle = NULL, chrs = NULL, drop_unstranded = TRUE) {
   gr <- prepare_sites(gr, label = NULL, strip_mcols = FALSE)
   window <- as.integer(window)
   if (!is.finite(window) || window < 1L) stop("`window` must be a positive integer.")
+
+  if (isTRUE(drop_unstranded)) {
+    st0 <- as.character(GenomicRanges::strand(gr))
+    keep_st <- st0 %in% c("+", "-")
+    if (!any(keep_st)) stop("No '+' or '-' stranded sites remain for strand-oriented motif scanning.")
+    gr <- gr[keep_st]
+  }
 
   if (!is.null(seqstyle)) {
     suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(gr) <- seqstyle, silent = TRUE))
@@ -232,8 +239,10 @@
 #' Compute a motif-enrichment profile around single-nucleotide sites
 #'
 #' Counts motif hits in strand-oriented windows centred on each site and returns
-#' a per-position profile. Character motifs are treated as exact/IUPAC DNA or RNA
-#' patterns; RNA U is converted to DNA T. Objects from the
+#' a per-position profile. Windows are extracted in transcript/RNA orientation:
+#' negative-strand sites are reverse-complemented by the sequence extraction step.
+#' Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA U is
+#' converted to DNA T. Objects from the
 #' universalmotif package are scanned with \code{universalmotif::scan_sequences()}.
 #'
 #' @param gr A single-nucleotide \code{GRanges}. For matched-set comparisons, pass
@@ -259,6 +268,11 @@
 #' @param smooth_window Optional moving-average smoothing width in bins. Use 1 for no smoothing.
 #' @param seqstyle Optional seqlevel style passed to the internal sequence-extraction step.
 #' @param chrs Optional seqlevels to keep for sequence extraction.
+#' @param drop_unstranded If TRUE, omit sites on '*' strand because RNA-oriented
+#'   motif profiles require a transcript strand.
+#' @param drop_edge_positions If TRUE, omit the extreme -window and +window
+#'   positions from the profile. This avoids artificial zero-valued edge bins
+#'   from full-width sequence extraction while keeping the plotted axis at +/-window.
 #'
 #' @return A data.frame with relative position, group, motif, counts, site counts,
 #'   and hits per site.
@@ -282,7 +296,9 @@ motif_enrichment_profile <- function(gr,
                                      bin_size = 1L,
                                      smooth_window = 1L,
                                      seqstyle = NULL,
-                                     chrs = NULL) {
+                                     chrs = NULL,
+                                     drop_unstranded = TRUE,
+                                     drop_edge_positions = FALSE) {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   method <- match.arg(method)
   method <- .posmatchr_motif_method(motif, method)
@@ -309,7 +325,14 @@ motif_enrichment_profile <- function(gr,
 
   tmp_row_col <- ".posmatchr_motif_row"
   S4Vectors::mcols(gr)[[tmp_row_col]] <- seq_along(gr)
-  prep <- .posmatchr_prepare_motif_windows(gr, genome = genome, window = window, seqstyle = seqstyle, chrs = chrs)
+  prep <- .posmatchr_prepare_motif_windows(
+    gr,
+    genome = genome,
+    window = window,
+    seqstyle = seqstyle,
+    chrs = chrs,
+    drop_unstranded = drop_unstranded
+  )
   valid <- prep$valid
   seqs <- prep$seqs
   row_index <- as.integer(S4Vectors::mcols(prep$gr)[[tmp_row_col]])
@@ -345,6 +368,7 @@ motif_enrichment_profile <- function(gr,
   group_levels <- unique(group_valid)
   positions <- seq(-window, window, by = bin_size)
   if (!length(positions) || tail(positions, 1L) != window) positions <- unique(c(positions, window))
+  if (isTRUE(drop_edge_positions)) positions <- positions[positions > -window & positions < window]
 
   n_sites <- as.data.frame(table(group = group_valid), stringsAsFactors = FALSE)
   names(n_sites) <- c("group", "n_sites")
@@ -360,6 +384,9 @@ motif_enrichment_profile <- function(gr,
   if (nrow(hits)) {
     hits <- merge(hits, site_lookup, by = "site_name", all.x = FALSE, all.y = FALSE)
     hits <- hits[is.finite(hits$relative_position) & hits$relative_position >= -window & hits$relative_position <= window, , drop = FALSE]
+    if (isTRUE(drop_edge_positions) && nrow(hits)) {
+      hits <- hits[hits$relative_position > -window & hits$relative_position < window, , drop = FALSE]
+    }
     if (nrow(hits)) {
       hits$relative_position <- .posmatchr_bin_relative_positions(hits$relative_position, window = window, bin_size = bin_size)
       agg <- stats::aggregate(
@@ -429,6 +456,8 @@ plot_motif_enrichment <- function(gr,
                                   smooth_window = 11L,
                                   seqstyle = NULL,
                                   chrs = NULL,
+                                  drop_unstranded = TRUE,
+                                  drop_edge_positions = TRUE,
                                   y = c("hits_per_site_smoothed", "hits_per_site", "count"),
                                   x_label = "Distance from site centre (bp)",
                                   y_label = NULL) {
@@ -455,7 +484,9 @@ plot_motif_enrichment <- function(gr,
     bin_size = bin_size,
     smooth_window = smooth_window,
     seqstyle = seqstyle,
-    chrs = chrs
+    chrs = chrs,
+    drop_unstranded = drop_unstranded,
+    drop_edge_positions = drop_edge_positions
   )
   prof$y_plot <- prof[[y]]
   ylab <- y_label %||% if (y == "count") "Motif-hit count" else "Motif hits per site"
@@ -463,6 +494,7 @@ plot_motif_enrichment <- function(gr,
   p <- ggplot2::ggplot(prof, ggplot2::aes(x = relative_position, y = y_plot, colour = group, linetype = motif)) +
     ggplot2::geom_line(linewidth = 1, na.rm = TRUE) +
     ggplot2::geom_vline(xintercept = 0, linetype = 2) +
+    ggplot2::scale_x_continuous(limits = c(-window, window), breaks = unique(c(-window, -round(window / 2), 0, round(window / 2), window))) +
     ggplot2::labs(x = x_label, y = ylab, colour = NULL, linetype = "Motif") +
     ggplot2::theme_bw()
 

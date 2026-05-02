@@ -25,6 +25,8 @@ plot_motif_enrichment(
   smooth_window = 11L,
   seqstyle = NULL,
   chrs = NULL,
+  drop_unstranded = TRUE,
+  drop_edge_positions = TRUE,
   y = c("hits_per_site_smoothed", "hits_per_site", "count"),
   x_label = "Distance from site centre (bp)",
   y_label = NULL
@@ -73,6 +75,13 @@ for strand-oriented transcript/RNA motifs.}
 \item{seqstyle}{Optional seqlevel style passed to the internal sequence-extraction step.}
 
 \item{chrs}{Optional seqlevels to keep for sequence extraction.}
+
+\item{drop_unstranded}{If TRUE, omit sites on '*' strand because RNA-oriented
+motif profiles require a transcript strand.}
+
+\item{drop_edge_positions}{If TRUE, omit the extreme -window and +window
+positions from the profile. This avoids artificial zero-valued edge bins
+from full-width sequence extraction while keeping the plotted axis at +/-window.}
 
 \item{y}{Value to plot: \code{"hits_per_site"}, \code{"hits_per_site_smoothed"}, or \code{"count"}.}
 
