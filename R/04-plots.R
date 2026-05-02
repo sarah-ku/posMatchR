@@ -464,3 +464,319 @@ plot_kmer_counts <- function(gr,
     ggplot2::theme_bw() +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
 }
+
+.matching_status <- function(gr,
+                             label_col = "label",
+                             set_col = "match_set",
+                             positive_value = "positive",
+                             negative_value = "matched_negative") {
+  mc <- S4Vectors::mcols(gr)
+  if (!(label_col %in% colnames(mc))) stop("Missing label_col: ", label_col)
+  y <- .normalise_binary_label(mc[[label_col]], strict = TRUE)
+  status <- ifelse(y == 1L, "unmatched_positive", "unselected_negative")
+  if (!is.null(set_col) && set_col %in% colnames(mc)) {
+    s <- as.character(mc[[set_col]])
+    status[s == positive_value] <- "matched_positive"
+    status[s == negative_value] <- "matched_negative"
+  } else {
+    if ("is_matched_positive" %in% colnames(mc)) {
+      f <- .normalise_binary_label(mc$is_matched_positive, strict = FALSE)
+      status[!is.na(f) & f == 1L] <- "matched_positive"
+    }
+    if ("is_matched_negative" %in% colnames(mc)) {
+      f <- .normalise_binary_label(mc$is_matched_negative, strict = FALSE)
+      status[!is.na(f) & f == 1L] <- "matched_negative"
+    }
+  }
+  factor(status, levels = c("unselected_negative", "unmatched_positive", "matched_negative", "matched_positive"))
+}
+
+.default_matching_pca_features <- function(gr, features = NULL) {
+  mc <- S4Vectors::mcols(gr)
+  if (!is.null(features)) return(intersect(as.character(features), colnames(mc)))
+
+  md <- S4Vectors::metadata(gr)
+  diag <- md$match_diagnostics
+  if (is.null(diag) && !is.null(md$posMatchR)) diag <- md$posMatchR$match_diagnostics
+
+  meta_col <- NULL
+  if (!is.null(diag$meta_col) && diag$meta_col %in% colnames(mc)) meta_col <- diag$meta_col
+  if (is.null(meta_col)) {
+    meta_col <- intersect(c("metagene_split3", "metagene_prop", "metagene_split"), colnames(mc))[1]
+  }
+
+  loc_cols <- intersect(c("loc_fiveUTR", "loc_coding", "loc_threeUTR"), colnames(mc))
+  bin_cols <- character(0)
+  if (!is.null(diag$bin_cols_used)) bin_cols <- intersect(as.character(diag$bin_cols_used), colnames(mc))
+  if (!length(bin_cols)) {
+    bin_cols <- intersect(c(
+      "nearest_exon_junction_dist", "start_dist_tx", "stop_dist_tx",
+      "start_dist", "stop_dist", "tx_len", "feature_width", "segment_rank",
+      "dist_from_feature_start", "dist_from_feature_end"
+    ), colnames(mc))
+  }
+
+  unique(c(meta_col, loc_cols, bin_cols))
+}
+
+.make_matching_pca_matrix <- function(gr, features) {
+  mc <- S4Vectors::mcols(gr)
+  mats <- list()
+  names_out <- character(0)
+
+  add_vec <- function(name, value) {
+    value <- suppressWarnings(as.numeric(value))
+    mats[[length(mats) + 1L]] <<- value
+    names_out[[length(names_out) + 1L]] <<- name
+  }
+
+  for (cl in features) {
+    if (!(cl %in% colnames(mc))) next
+    v <- mc[[cl]]
+    if (is.numeric(v) || is.integer(v) || is.logical(v)) {
+      add_vec(cl, v)
+    } else {
+      vv <- as.character(v)
+      lv <- sort(unique(vv[!is.na(vv) & nzchar(vv)]))
+      if (length(lv) > 1L && length(lv) <= 25L) {
+        for (x in lv) add_vec(paste0(cl, "=", x), as.integer(vv == x))
+      }
+    }
+  }
+
+  if (!length(mats)) stop("No usable numeric PCA features were found.")
+  X <- as.data.frame(mats, stringsAsFactors = FALSE)
+  colnames(X) <- names_out
+  X
+}
+
+#' Build PCA coordinates for matching diagnostics
+#'
+#' Constructs a PCA representation of the numeric covariates used by
+#' \code{match_background()}, then labels rows as matched positives, matched
+#' negatives, unmatched positives, or unselected negatives. For large candidate
+#' universes, unselected negatives are sampled before PCA to keep the diagnostic
+#' plot manageable.
+#'
+#' @param gr A \code{GRanges} returned by \code{match_background()} or
+#'   \code{match_random_background()}.
+#' @param features Optional metadata columns to use. If NULL, the function uses
+#'   \code{metadata(gr)$match_diagnostics$meta_col}, location indicator columns,
+#'   and \code{metadata(gr)$match_diagnostics$bin_cols_used} when available.
+#' @param label_col Binary label column.
+#' @param set_col Match-set column.
+#' @param positive_value Value marking matched positives in \code{set_col}.
+#' @param negative_value Value marking matched negatives in \code{set_col}.
+#' @param max_unselected Maximum number of unselected negatives to include.
+#' @param max_unmatched_positive Maximum number of unmatched positives to include.
+#' @param seed Random seed for diagnostic sampling.
+#' @param center,scale Passed to \code{stats::prcomp()}.
+#'
+#' @return A data.frame with PC coordinates, plotting status, row identifiers,
+#'   and attributes containing the \code{prcomp} object and features used.
+#' @export
+matching_pca_data <- function(gr,
+                              features = NULL,
+                              label_col = "label",
+                              set_col = "match_set",
+                              positive_value = "positive",
+                              negative_value = "matched_negative",
+                              max_unselected = 10000L,
+                              max_unmatched_positive = 5000L,
+                              seed = 1L,
+                              center = TRUE,
+                              scale = TRUE) {
+  if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
+  gr <- prepare_sites(gr, label = NULL, label_col = label_col, strip_mcols = FALSE)
+  mc <- S4Vectors::mcols(gr)
+
+  features <- .default_matching_pca_features(gr, features = features)
+  if (!length(features)) stop("No PCA features available.")
+
+  status <- .matching_status(
+    gr,
+    label_col = label_col,
+    set_col = set_col,
+    positive_value = positive_value,
+    negative_value = negative_value
+  )
+
+  keep <- rep(FALSE, length(gr))
+  keep[status %in% c("matched_positive", "matched_negative")] <- TRUE
+
+  set.seed(seed)
+  idx_unselected <- which(status == "unselected_negative")
+  if (length(idx_unselected)) {
+    n <- min(length(idx_unselected), as.integer(max_unselected))
+    keep[.posmatchr_sample(idx_unselected, size = n)] <- TRUE
+  }
+
+  idx_unmatched_pos <- which(status == "unmatched_positive")
+  if (length(idx_unmatched_pos)) {
+    n <- min(length(idx_unmatched_pos), as.integer(max_unmatched_positive))
+    keep[.posmatchr_sample(idx_unmatched_pos, size = n)] <- TRUE
+  }
+
+  idx <- which(keep)
+  if (length(idx) < 3L) stop("Too few rows available for PCA diagnostic plot.")
+
+  X <- .make_matching_pca_matrix(gr[idx], features = features)
+  ok <- stats::complete.cases(X)
+  if (!any(ok)) stop("No complete rows for PCA after selecting features.")
+  X <- X[ok, , drop = FALSE]
+  idx <- idx[ok]
+
+  sds <- vapply(X, stats::sd, numeric(1), na.rm = TRUE)
+  keep_col <- is.finite(sds) & sds > 0
+  X <- X[, keep_col, drop = FALSE]
+  if (ncol(X) < 2L) stop("Fewer than two non-constant PCA features remain.")
+
+  pca <- stats::prcomp(X, center = center, scale. = scale)
+  pct <- (pca$sdev^2) / sum(pca$sdev^2)
+
+  out <- data.frame(
+    row_index = idx,
+    site_id = names(gr)[idx],
+    PC1 = pca$x[, 1L],
+    PC2 = pca$x[, 2L],
+    status = status[idx],
+    label = .normalise_binary_label(mc[[label_col]], strict = TRUE)[idx],
+    match_set = if (!is.null(set_col) && set_col %in% colnames(mc)) as.character(mc[[set_col]][idx]) else NA_character_,
+    stringsAsFactors = FALSE
+  )
+  out$status <- factor(out$status, levels = levels(status))
+
+  attr(out, "pca") <- pca
+  attr(out, "features_used") <- colnames(X)
+  attr(out, "variance_explained") <- pct
+  out
+}
+
+#' Plot a PCA diagnostic of matching covariates
+#'
+#' Shows sites in the first two principal components of the numeric covariates
+#' used for matching. Matched positives and matched negatives are highlighted,
+#' while unselected negatives are shown as a light grey reference cloud.
+#'
+#' @inheritParams matching_pca_data
+#' @param point_size Point size.
+#' @param alpha_unselected Alpha for unselected negatives.
+#' @param alpha_highlight Alpha for matched positives/negatives.
+#'
+#' @return A ggplot object.
+#' @export
+plot_matching_pca <- function(gr,
+                              features = NULL,
+                              label_col = "label",
+                              set_col = "match_set",
+                              positive_value = "positive",
+                              negative_value = "matched_negative",
+                              max_unselected = 10000L,
+                              max_unmatched_positive = 5000L,
+                              seed = 1L,
+                              center = TRUE,
+                              scale = TRUE,
+                              point_size = 0.8,
+                              alpha_unselected = 0.18,
+                              alpha_highlight = 0.75) {
+  df <- matching_pca_data(
+    gr = gr,
+    features = features,
+    label_col = label_col,
+    set_col = set_col,
+    positive_value = positive_value,
+    negative_value = negative_value,
+    max_unselected = max_unselected,
+    max_unmatched_positive = max_unmatched_positive,
+    seed = seed,
+    center = center,
+    scale = scale
+  )
+  pct <- attr(df, "variance_explained")
+  xl <- if (length(pct) >= 1L) paste0("PC1 (", round(100 * pct[1L], 1), "%)") else "PC1"
+  yl <- if (length(pct) >= 2L) paste0("PC2 (", round(100 * pct[2L], 1), "%)") else "PC2"
+
+  bg <- df[df$status == "unselected_negative", , drop = FALSE]
+  um <- df[df$status == "unmatched_positive", , drop = FALSE]
+  hi <- df[df$status %in% c("matched_negative", "matched_positive"), , drop = FALSE]
+
+  p <- ggplot2::ggplot() +
+    ggplot2::theme_bw() +
+    ggplot2::labs(x = xl, y = yl, colour = NULL)
+
+  if (nrow(bg)) {
+    p <- p + ggplot2::geom_point(
+      data = bg,
+      ggplot2::aes(x = PC1, y = PC2),
+      colour = "grey80",
+      alpha = alpha_unselected,
+      size = point_size
+    )
+  }
+
+  if (nrow(um)) {
+    p <- p + ggplot2::geom_point(
+      data = um,
+      ggplot2::aes(x = PC1, y = PC2),
+      colour = "grey55",
+      alpha = min(alpha_highlight, 0.35),
+      size = point_size
+    )
+  }
+
+  if (nrow(hi)) {
+    p <- p + ggplot2::geom_point(
+      data = hi,
+      ggplot2::aes(x = PC1, y = PC2, colour = status),
+      alpha = alpha_highlight,
+      size = point_size
+    )
+  }
+
+  p
+}
+
+#' Summarise k-mer balance in matched sets
+#'
+#' @param gr A matched \code{GRanges}; either a full object returned by a matcher
+#'   or the paired subset returned by \code{subset_matched_sets()}.
+#' @param kmer_col K-mer metadata column.
+#' @param set_col Match-set column.
+#' @param positive_value Value marking matched positives.
+#' @param negative_value Value marking matched negatives.
+#' @param subset_first If TRUE, call \code{subset_matched_sets()} before counting
+#'   when canonical match-ID columns are present.
+#'
+#' @return A data.frame with positive and matched-negative counts by k-mer.
+#' @export
+summarise_matched_kmer_balance <- function(gr,
+                                           kmer_col = "kmer",
+                                           set_col = "match_set",
+                                           positive_value = "positive",
+                                           negative_value = "matched_negative",
+                                           subset_first = TRUE) {
+  if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
+  if (isTRUE(subset_first) && all(c("matched_negative_id", "matched_positive_id") %in% colnames(S4Vectors::mcols(gr)))) {
+    gr <- subset_matched_sets(gr)
+  }
+  mc <- S4Vectors::mcols(gr)
+  if (!(kmer_col %in% colnames(mc))) stop("Missing kmer_col: ", kmer_col)
+  if (!(set_col %in% colnames(mc))) stop("Missing set_col: ", set_col)
+
+  km <- as.character(mc[[kmer_col]])
+  ss <- as.character(mc[[set_col]])
+  km[is.na(km) | !nzchar(km)] <- NA_character_
+  vals <- sort(unique(km[!is.na(km)]))
+  pos_mask <- !is.na(ss) & ss == positive_value & !is.na(km)
+  neg_mask <- !is.na(ss) & ss == negative_value & !is.na(km)
+  pos <- tabulate(match(km[pos_mask], vals), nbins = length(vals))
+  neg <- tabulate(match(km[neg_mask], vals), nbins = length(vals))
+  out <- data.frame(
+    kmer = vals,
+    positive = as.integer(pos),
+    matched_negative = as.integer(neg),
+    difference = as.integer(pos - neg),
+    stringsAsFactors = FALSE
+  )
+  out[order(abs(out$difference), decreasing = TRUE), , drop = FALSE]
+}

@@ -50,3 +50,8 @@ export(match_random_background)
 export(subset_matched_sets)
 export(plot_motif_enrichment)
 export(motif_enrichment_profile)
+
+export(plot_matching_pca)
+export(matching_pca_data)
+export(summarise_matched_kmer_balance)
+importFrom(utils,tail)

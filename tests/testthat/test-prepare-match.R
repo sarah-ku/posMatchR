@@ -104,3 +104,35 @@ test_that("match_random_background can optionally preserve location", {
   expect_true(all(as.character(mc$location[pos_idx]) == as.character(mc$location[neg_idx])))
   expect_equal(length(paired), 4L)
 })
+
+test_that("match_random_background gives exact kmer balance for reciprocal pairs", {
+  skip_if_not_installed("GenomicRanges")
+  skip_if_not_installed("IRanges")
+
+  gr <- GenomicRanges::GRanges(
+    seqnames = rep("chr1", 10),
+    ranges = IRanges::IRanges(start = seq(10, 100, by = 10), width = 1),
+    strand = rep("+", 10)
+  )
+  names(gr) <- paste0("k", seq_along(gr))
+  S4Vectors::mcols(gr)$label <- c(1, 1, 1, 1, 0, 0, 0, 0, 0, 0)
+  S4Vectors::mcols(gr)$gene_id <- rep("g1", 10)
+  S4Vectors::mcols(gr)$location <- rep("coding", 10)
+  S4Vectors::mcols(gr)$kmer <- c("AAAAA", "AAAAA", "CCCCC", "GGGGG", "AAAAA", "AAAAA", "CCCCC", "CCCCC", "TTTTT", "GGGGG")
+
+  out <- match_random_background(
+    gr,
+    group_col = "gene_id",
+    match_location = TRUE,
+    kmer_match = TRUE,
+    kmer_col = "kmer",
+    seed = 1L
+  )
+  paired <- subset_matched_sets(out)
+  bal <- summarise_matched_kmer_balance(paired, subset_first = FALSE)
+
+  expect_equal(sum(S4Vectors::mcols(out)$is_matched_positive), 4L)
+  expect_equal(sum(S4Vectors::mcols(out)$is_matched_negative), 4L)
+  expect_true(all(bal$difference == 0L))
+  expect_equal(S4Vectors::metadata(out)$match_diagnostics$kmer_mismatch_in_validated_pairs, 0L)
+})

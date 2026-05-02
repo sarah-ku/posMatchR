@@ -644,10 +644,13 @@ match_random_background <- function(gr,
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   gr <- prepare_sites(gr, label = NULL, label_col = label_col, strip_mcols = FALSE)
   mc <- S4Vectors::mcols(gr)
+  ids <- names(gr)
+
   if (!(label_col %in% colnames(mc))) stop("Missing label_col: ", label_col)
   if (!(group_col %in% colnames(mc))) stop("Missing group_col: ", group_col)
   if (kmer_match && !(kmer_col %in% colnames(mc))) stop("kmer_match=TRUE but missing kmer_col: ", kmer_col)
   if (isTRUE(match_location) && !(location_col %in% colnames(mc))) stop("match_location=TRUE but missing location_col: ", location_col)
+  if (!is.null(locations) && !(location_col %in% colnames(mc))) stop("`locations` supplied but missing location_col: ", location_col)
   if (!is.null(match_cols)) {
     missing_cols <- setdiff(as.character(match_cols), colnames(mc))
     if (length(missing_cols)) stop("Missing match_cols: ", paste(missing_cols, collapse = ", "))
@@ -658,7 +661,6 @@ match_random_background <- function(gr,
 
   eligible <- rep(TRUE, length(gr))
   if (!is.null(locations)) {
-    if (!(location_col %in% colnames(mc))) stop("Missing location_col: ", location_col)
     eligible <- eligible & as.character(mc[[location_col]]) %in% as.character(locations)
   }
 
@@ -673,18 +675,23 @@ match_random_background <- function(gr,
     out
   }
 
+  key_cols_used <- group_col
   if (isTRUE(match_location)) {
     group <- append_to_group(group, mc[[location_col]])
+    key_cols_used <- c(key_cols_used, location_col)
   }
 
   if (!is.null(match_cols) && length(match_cols)) {
     for (cl in as.character(match_cols)) {
       group <- append_to_group(group, mc[[cl]])
     }
+    key_cols_used <- c(key_cols_used, as.character(match_cols))
   }
 
   if (kmer_match) {
-    group <- append_to_group(group, .iupac_to_plain(as.character(mc[[kmer_col]])))
+    km <- .iupac_to_plain(as.character(mc[[kmer_col]]))
+    group <- append_to_group(group, km)
+    key_cols_used <- c(key_cols_used, kmer_col)
   }
 
   eligible <- eligible & !is.na(group)
@@ -693,9 +700,17 @@ match_random_background <- function(gr,
 
   matched_neg_for_pos <- rep(NA_character_, length(gr))
   matched_pos_for_neg <- rep(NA_character_, length(gr))
-  neg_used <- rep(FALSE, length(gr))
   meta_delta <- rep(NA_real_, length(gr))
-  meta <- if ("metagene_split3" %in% colnames(mc)) suppressWarnings(as.numeric(mc$metagene_split3)) else rep(NA_real_, length(gr))
+  meta <- if ("metagene_split3" %in% colnames(mc)) {
+    suppressWarnings(as.numeric(mc$metagene_split3))
+  } else if ("metagene_prop" %in% colnames(mc)) {
+    suppressWarnings(as.numeric(mc$metagene_prop))
+  } else {
+    rep(NA_real_, length(gr))
+  }
+
+  pair_pos <- integer(0)
+  pair_neg <- integer(0)
 
   set.seed(seed)
   keys <- intersect(unique(group[pos_idx]), unique(group[neg_idx]))
@@ -705,25 +720,87 @@ match_random_background <- function(gr,
     P <- pos_idx[group[pos_idx] == key]
     N <- neg_idx[group[neg_idx] == key]
     if (!length(P) || !length(N)) next
-    P <- sample(P)
-    N <- sample(N)
+
+    P <- .posmatchr_sample(P)
+    N <- .posmatchr_sample(N)
     n <- min(length(P), length(N))
     if (n <= 0L) next
-    P <- P[seq_len(n)]
-    N <- N[seq_len(n)]
-    matched_neg_for_pos[P] <- names(gr)[N]
-    matched_pos_for_neg[N] <- names(gr)[P]
-    neg_used[N] <- TRUE
-    ok_meta <- is.finite(meta[P]) & is.finite(meta[N])
-    if (any(ok_meta)) meta_delta[P[ok_meta]] <- abs(meta[P[ok_meta]] - meta[N[ok_meta]])
+
+    pair_pos <- c(pair_pos, P[seq_len(n)])
+    pair_neg <- c(pair_neg, N[seq_len(n)])
+  }
+
+  # Rebuild all reciprocal pair columns from the selected pairs only. This is
+  # deliberately done in one block so stale matching columns from a previous call
+  # cannot leak into diagnostics or downstream matched-set subsetting.
+  if (length(pair_pos)) {
+    ord <- order(pair_pos, pair_neg)
+    pair_pos <- pair_pos[ord]
+    pair_neg <- pair_neg[ord]
+
+    # Defensive conflict resolution. The loop above samples without replacement
+    # within each key, but this protects against malformed inputs with duplicated
+    # names or keys after user-side modification.
+    keep <- !duplicated(pair_pos) & !duplicated(pair_neg)
+    pair_pos <- pair_pos[keep]
+    pair_neg <- pair_neg[keep]
+
+    matched_neg_for_pos[pair_pos] <- ids[pair_neg]
+    matched_pos_for_neg[pair_neg] <- ids[pair_pos]
+    ok_meta <- is.finite(meta[pair_pos]) & is.finite(meta[pair_neg])
+    if (any(ok_meta)) meta_delta[pair_pos[ok_meta]] <- abs(meta[pair_pos[ok_meta]] - meta[pair_neg[ok_meta]])
+  }
+
+  # Final reciprocal validation used for both flags and diagnostics.
+  matched_pos_idx <- which(y == 1L & !is.na(matched_neg_for_pos) & nzchar(matched_neg_for_pos))
+  matched_neg_idx <- match(matched_neg_for_pos[matched_pos_idx], ids)
+  ok <- !is.na(matched_neg_idx) & y[matched_neg_idx] == 0L
+  if (any(ok)) {
+    back <- matched_pos_for_neg[matched_neg_idx[ok]]
+    ok2 <- !is.na(back) & nzchar(back) & back == ids[matched_pos_idx[ok]]
+    ok[ok] <- ok2
+  }
+  matched_pos_idx <- matched_pos_idx[ok]
+  matched_neg_idx <- matched_neg_idx[ok]
+
+  # If anything failed the reciprocal check, clear it rather than letting the
+  # subsetter or plotting helpers see a partial/non-reciprocal pair.
+  matched_neg_for_pos2 <- rep(NA_character_, length(gr))
+  matched_pos_for_neg2 <- rep(NA_character_, length(gr))
+  meta_delta2 <- rep(NA_real_, length(gr))
+  if (length(matched_pos_idx)) {
+    matched_neg_for_pos2[matched_pos_idx] <- ids[matched_neg_idx]
+    matched_pos_for_neg2[matched_neg_idx] <- ids[matched_pos_idx]
+    meta_delta2[matched_pos_idx] <- meta_delta[matched_pos_idx]
+  }
+  matched_neg_for_pos <- matched_neg_for_pos2
+  matched_pos_for_neg <- matched_pos_for_neg2
+  meta_delta <- meta_delta2
+
+  kmer_mismatch <- NA_integer_
+  if (kmer_match && length(matched_pos_idx)) {
+    km_final <- .iupac_to_plain(as.character(mc[[kmer_col]]))
+    kmer_mismatch <- sum(km_final[matched_pos_idx] != km_final[matched_neg_idx], na.rm = TRUE)
+    if (kmer_mismatch > 0L) {
+      warning("Internal k-mer matching validation found ", kmer_mismatch,
+              " mismatched pairs. Clearing those pairs.")
+      keep_km <- km_final[matched_pos_idx] == km_final[matched_neg_idx]
+      keep_km[is.na(keep_km)] <- FALSE
+      matched_neg_for_pos[matched_pos_idx[!keep_km]] <- NA_character_
+      matched_pos_for_neg[matched_neg_idx[!keep_km]] <- NA_character_
+      meta_delta[matched_pos_idx[!keep_km]] <- NA_real_
+      matched_pos_idx <- matched_pos_idx[keep_km]
+      matched_neg_idx <- matched_neg_idx[keep_km]
+      kmer_mismatch <- 0L
+    }
   }
 
   mc$is_positive <- as.integer(y == 1L)
   mc$matched_negative_id <- matched_neg_for_pos
   mc$matched_positive_id <- matched_pos_for_neg
   mc$meta_delta <- meta_delta
-  mc$is_matched_negative <- as.integer(neg_used)
-  mc$is_matched_positive <- as.integer(!is.na(matched_neg_for_pos))
+  mc$is_matched_positive <- as.integer(seq_along(gr) %in% matched_pos_idx)
+  mc$is_matched_negative <- as.integer(seq_along(gr) %in% matched_neg_idx)
   mc$match_set <- ifelse(
     mc$is_matched_positive == 1L,
     "positive",
@@ -739,15 +816,23 @@ match_random_background <- function(gr,
     diag <- list(
       method = "random_within_group",
       group_col = group_col,
-      kmer_match = kmer_match,
+      key_cols_used = key_cols_used,
+      kmer_match = isTRUE(kmer_match),
+      kmer_col = if (isTRUE(kmer_match)) kmer_col else NULL,
+      kmer_mismatch_in_validated_pairs = kmer_mismatch,
       match_location = isTRUE(match_location),
       location_col = location_col,
+      locations = locations,
       match_cols = match_cols,
-      n_positive = length(pos_idx),
-      n_negative = length(neg_idx),
-      n_matched_positive = sum(!is.na(matched_neg_for_pos)),
-      n_matched_negative = sum(neg_used),
-      unmatched_positive = length(pos_idx) - sum(!is.na(matched_neg_for_pos))
+      n_positive_total = sum(y == 1L, na.rm = TRUE),
+      n_negative_total = sum(y == 0L, na.rm = TRUE),
+      n_positive_eligible = length(pos_idx),
+      n_negative_eligible = length(neg_idx),
+      n_matched_pairs = length(matched_pos_idx),
+      n_matched_positive = length(matched_pos_idx),
+      n_matched_negative = length(matched_neg_idx),
+      unmatched_positive_eligible = length(pos_idx) - length(matched_pos_idx),
+      unmatched_positive_total = sum(y == 1L, na.rm = TRUE) - length(matched_pos_idx)
     )
     md <- S4Vectors::metadata(gr)
     md$match_diagnostics <- diag

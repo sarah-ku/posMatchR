@@ -226,6 +226,17 @@ print(list(
   covariate_kmer = S4Vectors::metadata(covariate_kmer)$match_diagnostics
 ))
 
+write.csv(
+  summarise_matched_kmer_balance(random_region_kmer, kmer_col = "kmer"),
+  file.path(outdir, "random_region_kmer_balance.csv"),
+  row.names = FALSE
+)
+write.csv(
+  summarise_matched_kmer_balance(covariate_kmer, kmer_col = "kmer"),
+  file.path(outdir, "covariate_kmer_balance.csv"),
+  row.names = FALSE
+)
+
 # -------------------------------------------------------------------------
 # 6. Diagnostic plots for each matched set
 # -------------------------------------------------------------------------
@@ -254,7 +265,38 @@ for (nm in names(matched_objects)) {
 }
 
 # -------------------------------------------------------------------------
-# 7. Motif-enrichment profiles around matched positives and negatives
+# 7. PCA diagnostic for covariate-aware matching
+# -------------------------------------------------------------------------
+
+# The PCA is fit to the matching covariates stored in match_diagnostics. Matched
+# positives and matched negatives are highlighted; a sample of unselected
+# candidate negatives is shown as a light grey reference cloud.
+save_plot(
+  plot_matching_pca(
+    covariate,
+    max_unselected = 10000,
+    max_unmatched_positive = 5000,
+    seed = 1L
+  ),
+  "07_covariate_matching_pca.pdf",
+  width = 6,
+  height = 5
+)
+
+save_plot(
+  plot_matching_pca(
+    covariate_kmer,
+    max_unselected = 10000,
+    max_unmatched_positive = 5000,
+    seed = 1L
+  ),
+  "08_covariate_kmer_matching_pca.pdf",
+  width = 6,
+  height = 5
+)
+
+# -------------------------------------------------------------------------
+# 8. Motif-enrichment profiles around matched positives and negatives
 # -------------------------------------------------------------------------
 
 # RNA motif UNUNU is scanned as DNA TNTNT after strand-oriented extraction.
@@ -280,7 +322,7 @@ for (nm in names(matched_objects)) {
       edge_trim = 2L,
       center_exclude = 10L
     ),
-    paste0("07_", nm, "_UNUNU_motif_enrichment_250bp.pdf"),
+    paste0("09_", nm, "_UNUNU_motif_enrichment_250bp.pdf"),
     width = 7,
     height = 4
   )
