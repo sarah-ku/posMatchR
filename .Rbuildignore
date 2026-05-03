@@ -9,3 +9,4 @@
 ^REFACTOR_NOTES\.md$
 ^posmatchr_.*_smoke_results$
 ^_problems$
+^inst/examples/\.gitkeep$

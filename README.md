@@ -1,231 +1,188 @@
 # posMatchR
 
-`posMatchR` annotates single-nucleotide `GRanges` sites with transcript context and constructs matched background site sets for post-transcriptional analyses such as m6A, A-to-I editing, HyperTRIBE, RNA-binding maps, and motif enrichment tests.
+`posMatchR` annotates single-nucleotide `GRanges` sites with transcript context and constructs matched background site sets for post-transcriptional analyses such as m6A, A-to-I editing and precise RNA-binding maps.
 
-The expected input is a point-site `GRanges`: each row should represent one nucleotide. Wider ranges are resized to width 1 by `prepare_sites()` and `annotate_sites()` unless you request an error.
+The expected input is a single-nucleotide `GRanges`. Wider ranges are resized to width 1 by `prepare_sites()` and `annotate_sites()`.
 
-## Core workflow
+## Installation
+
+Install the package from GitHub:
+
+```r
+install.packages("remotes")
+remotes::install_github("sarah-ku/posMatchR")
+```
+
+For the human hg38 examples below, install the required Bioconductor annotation packages:
+
+```r
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+BiocManager::install(c(
+  "GenomicRanges",
+  "GenomeInfoDb",
+  "TxDb.Hsapiens.UCSC.hg38.knownGene",
+  "org.Hs.eg.db",
+  "BSgenome.Hsapiens.UCSC.hg38"
+))
+```
+
+## Basic human annotation workflow
+
+This example assumes that you already have a single-nucleotide `GRanges` object or an `.rds`/`.RData`/`.Rdat` file containing one. The example uses human hg38/UCSC chromosome names.
 
 ```r
 library(posMatchR)
 library(GenomicRanges)
-library(IRanges)
+library(GenomeInfoDb)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(org.Hs.eg.db)
 
-# A vanilla set of observed single-nucleotide sites.
-sites <- GRanges(
-  seqnames = c("chr1", "chr1"),
-  ranges = IRanges(c(100000, 200000), width = 1),
-  strand = c("+", "-")
+# Option 1: load a GRanges object from file.
+sites <- load_sites("path/to/sites.rds")
+
+# Option 2: if you already have a GRanges object, use it directly.
+# sites <- my_sites_granges
+
+human_chrs <- paste0("chr", c(1:22, "X", "Y"))
+
+# Standardise to width-1 sites and keep the main chromosomes.
+sites <- prepare_sites(sites)
+GenomeInfoDb::seqlevelsStyle(sites) <- "UCSC"
+sites <- GenomeInfoDb::keepSeqlevels(
+  sites,
+  human_chrs,
+  pruning.mode = "coarse"
 )
 
-library(TxDb.Hsapiens.UCSC.hg38.knownGene)
-txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
 
 ann <- annotate_sites(
   gr = sites,
   txdb = txdb,
   seqstyle = "UCSC",
-  chrs = paste0("chr", c(1:22, "X", "Y"))
-)
-
-plot_metagene_density(ann)
-as_site_table(ann)
-```
-
-## Matched background workflow
-
-Supply candidate negative/background positions as another `GRanges`. For m6A, these might be all eligible adenosines or DRACH-centred adenosines in the assayed transcript space; for A-to-I editing, these might be eligible adenosines after expression/coverage filtering.
-
-```r
-res <- posmatchr_quickstart(
-  sites = observed_sites,
-  background = candidate_background_sites,
-  txdb = txdb,
-  genome = BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38,
+  chrs = human_chrs,
+  tx_select = "longest",
   orgdb = org.Hs.eg.db::org.Hs.eg.db,
-  seqstyle = "UCSC",
-  chrs = paste0("chr", c(1:22, "X", "Y")),
-  match_args = list(
-    kmer_match = TRUE,
-    meta_col = "metagene_split3",
-    bin_match = TRUE,
-    bin_cols = c("nearest_exon_junction_dist", "start_dist_tx", "stop_dist_tx", "tx_len")
-  )
-)
-
-matched_gr <- res$matched_pairs
-res$plots$metagene
-res$plots$junction_distance
-```
-
-## Arabidopsis / plant use
-
-For `TxDb.Athaliana.BioMart.plantsmart51`, chromosome names are typically `"1"` to `"5"` for the main nuclear chromosomes. If your site object also contains mitochondrial, plastid, or non-standard contigs that are absent from the TxDb, pass `chrs = c("1","2","3","4","5")`. posMatchR will drop unsupported seqlevels with a warning rather than failing late in the annotation process.
-
-```r
-library(TxDb.Athaliana.BioMart.plantsmart51)
-library(org.At.tair.db)
-
-txdb <- TxDb.Athaliana.BioMart.plantsmart51
-
-ann <- annotate_sites(
-  gr = plant_sites,
-  txdb = txdb,
-  chrs = c("1", "2", "3", "4", "5"),
-  orgdb = org.At.tair.db::org.At.tair.db,
-  gene_keytype = "TAIR",
+  gene_keytype = "ENTREZID",
   gene_symbol_col = "SYMBOL",
   gene_name_col = "GENENAME"
 )
+
+# Compact table for inspection or export.
+basic <- as_basic_site_table(ann)
+head(basic)
+
+# Basic diagnostic plots.
+plot_metagene_density(ann)
+plot_junction_distance_density(ann)
 ```
 
-## Main columns added by `annotate_sites()`
+The annotated `GRanges` keeps the original site coordinates and adds transcript, gene, region, metagene and local feature-geometry columns. For most reporting purposes, `as_basic_site_table()` gives a smaller table with the main annotations.
 
-`location` is the raw `VariantAnnotation::locateVariants()` class, such as `fiveUTR`, `coding`, `threeUTR`, `intron`, `spliceSite`, `promoter`, `intergenic`, or `unannotated`.
+## Basic matched-background workflow
 
-`feature` and `region_class` are simplified labels: `5UTR`, `CDS`, `3UTR`, `intron`, `spliceSite`, `promoter`, `intergenic`, or `unannotated`.
-
-`metagene_prop` is a 0--3 coordinate with equal-width 5'UTR/CDS/3'UTR regions.
-
-`metagene_split` and `metagene_split3` use median- or mean-derived transcript lengths to allocate more realistic axis widths to 5'UTR/CDS/3'UTR.
-
-`nearest_exon_junction_dist`, `start_dist_tx`, and `stop_dist_tx` are intended for density plots and background matching. `start_dist` and `stop_dist` are also retained as genomic-coordinate distances for compatibility.
-
-## Metadata handling
-
-The package preserves arbitrary existing metadata by default. It replaces only columns generated by posMatchR when rerunning annotation. Use `preserve_mcols = FALSE` in `annotate_sites()` or `strip_mcols = TRUE` in `prepare_sites()` when you explicitly want to discard old metadata.
-
-## Loading sites from files
+To construct a matched background, provide a second single-nucleotide `GRanges` containing candidate background sites. For m6A, this might be a set of eligible adenosines or eligible DRACH-centred adenosines. The candidates should be defined before using `posMatchR`, based on the biological question and the data quality filters appropriate for the experiment.
 
 ```r
-sites <- load_sites("sacsGR.Rdat")
-
-# If needed, do simple organism-specific seqlevel handling in the script.
-# For example, keep Arabidopsis nuclear chromosomes using TxDb-style names:
-GenomeInfoDb::seqlevels(sites) <- sub("^Chr([1-5])$", "\\1", GenomeInfoDb::seqlevels(sites))
-sites <- GenomeInfoDb::keepSeqlevels(sites, c("1", "2", "3", "4", "5"), pruning.mode = "coarse")
-
-bed_sites <- import_bed_sites("sites.bed")
-```
-
-`load_sites()` accepts `.rds`, `.RData`, `.Rda`, and `.Rdat` files. `import_bed_sites()` uses `rtracklayer::import()` and then applies `prepare_sites()`.
-
-## Arabidopsis k-mers with TAIR BSgenome
-
-`BSgenome.Athaliana.TAIR.TAIR9` uses `Chr1` to `Chr5`, `ChrM`, and `ChrC`, while `TxDb.Athaliana.BioMart.plantsmart51` uses `1` to `5`. A simple approach is to keep the TxDb convention and rename the in-memory genome/site seqlevels to match it:
-
-```r
-library(BSgenome.Athaliana.TAIR.TAIR9)
+library(posMatchR)
 library(GenomeInfoDb)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(org.Hs.eg.db)
 
-genome <- BSgenome.Athaliana.TAIR.TAIR9::Athaliana
-GenomeInfoDb::seqlevels(genome) <- c("1", "2", "3", "4", "5", "Mt", "Pt")
-arab_chrs <- c("1", "2", "3", "4", "5")
+human_chrs <- paste0("chr", c(1:22, "X", "Y"))
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
 
-txdb <- TxDb.Athaliana.BioMart.plantsmart51::TxDb.Athaliana.BioMart.plantsmart51
+positives <- load_sites("path/to/positive_sites.rds")
+background <- load_sites("path/to/candidate_background_sites.rds")
 
-GenomeInfoDb::seqlevels(plant_sites) <- sub("^Chr([1-5])$", "\\1", GenomeInfoDb::seqlevels(plant_sites))
-plant_sites <- GenomeInfoDb::keepSeqlevels(plant_sites, arab_chrs, pruning.mode = "coarse")
+positives <- prepare_sites(positives)
+background <- prepare_sites(background)
 
-ann <- annotate_sites(plant_sites, txdb = txdb, chrs = arab_chrs)
-ann <- add_kmer(ann, genome = genome, k = 5, chrs = arab_chrs)
-```
+GenomeInfoDb::seqlevelsStyle(positives) <- "UCSC"
+GenomeInfoDb::seqlevelsStyle(background) <- "UCSC"
 
+positives <- GenomeInfoDb::keepSeqlevels(positives, human_chrs, pruning.mode = "coarse")
+background <- GenomeInfoDb::keepSeqlevels(background, human_chrs, pruning.mode = "coarse")
 
-## Building candidate background universes
-
-Before matching, you need a candidate background universe. For m6A-like analyses this can be all eligible transcript-oriented adenosines, observed site-centred 5-mers such as DRACH-like contexts, or a specific IUPAC motif. The package provides simple generators for these cases.
-
-```r
-# All transcript-oriented As in the same foreground genes.
-bg_A <- make_base_universe(
-  foreground = ann,
-  txdb = txdb,
-  genome = genome,
-  base = "A",
-  scope = "genes"
+combined <- combine_site_sets(
+  positives = positives,
+  background = background,
+  label_col = "label",
+  site_id_col = "site_id"
 )
 
-# All observed foreground 5-mers in the same foreground genes.
-# Later using kmer_match = TRUE gives exact k-mer balance for matched pairs.
-bg_5mer <- make_kmer_universe(
-  foreground = ann,
+combined <- annotate_sites(
+  gr = combined,
   txdb = txdb,
-  genome = genome,
-  kmer_col = "kmer",
-  min_count = 2,
-  scope = "genes"
+  seqstyle = "UCSC",
+  chrs = human_chrs,
+  tx_select = "longest",
+  orgdb = org.Hs.eg.db::org.Hs.eg.db,
+  gene_keytype = "ENTREZID",
+  gene_symbol_col = "SYMBOL",
+  gene_name_col = "GENENAME"
 )
 
-# IUPAC motif example. DRACH is centred on the third character.
-bg_drach <- make_motif_universe(
-  foreground = ann,
-  txdb = txdb,
-  genome = genome,
-  patterns = "DRACH",
-  site_offset = 3,
-  scope = "genes"
+matched <- match_background(
+  combined,
+  label_col = "label",
+  meta_col = "metagene_split3",
+  meta_tol = 0.03,
+  enforce_meta_tol = TRUE,
+  bin_match = TRUE,
+  kmer_match = FALSE,
+  seed = 1L
 )
 
-combined <- combine_site_sets(ann, bg_5mer)
-combined <- annotate_sites(combined, txdb = txdb)
-combined <- add_kmer(combined, genome = genome, k = 5)
-
-# Simple baseline: random background from the same gene, optionally same k-mer.
-random_gene <- match_random_background(combined, group_col = "gene_id", kmer_match = TRUE)
-
-# More constrained matcher: same region/k-mer plus metagene and distance covariates.
-matched <- match_background(combined, kmer_match = TRUE, bin_match = TRUE)
-
-# Diagnostic plots should be made on the matched positive/background rows only.
 matched_sets <- subset_matched_sets(matched)
+
 plot_metagene_density(matched_sets, set_col = "match_set")
 plot_junction_distance_density(matched_sets, set_col = "match_set")
-plot_kmer_counts(matched_sets, set_col = "match_set", top_n = 25)
+
+S4Vectors::metadata(matched)$match_diagnostics
 ```
 
-## Compact output tables
-
-The annotated `GRanges` keeps detailed geometry columns at top level because plotting and matching functions use them directly. For reporting, use a smaller table:
+If exact 5-mer balancing is needed, add sequence context before matching and set `kmer_match = TRUE`:
 
 ```r
-basic <- as_basic_site_table(ann)
-full <- as_site_table(ann, columns = "all")
-```
+library(BSgenome.Hsapiens.UCSC.hg38)
 
-If you are finished with matching and plotting and want a compact `GRanges`, use:
-
-```r
-compact_ann <- compact_site_mcols(ann)
-```
-
-## Motif enrichment around matched sites
-
-`plot_motif_enrichment()` counts motif hits in windows centred on the input sites and plots the profile around position 0. Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA `U` is converted to DNA `T`. Objects from the `universalmotif` package can also be supplied when PWM/log-odds scanning is needed.
-
-```r
-matched_sets <- subset_matched_sets(matched)
-
-plot_motif_enrichment(
-  matched_sets,
-  genome = genome,
-  motif = c(PUM_PRE = "TGTANATA", ARE_AUUUA = "ATTTA"),
-  window = 250,
-  set_col = "match_set",
-  hit_position = "center",
-  smooth_window = 11
+combined <- add_kmer(
+  combined,
+  genome = BSgenome.Hsapiens.UCSC.hg38::Hsapiens,
+  k = 5L,
+  seqstyle = "UCSC",
+  chrs = human_chrs
 )
 
-if (requireNamespace("universalmotif", quietly = TRUE)) {
-  pum <- universalmotif::create_motif("TGTANATA", alphabet = "DNA", name = "PUM_PRE")
-  plot_motif_enrichment(
-    matched_sets,
-    genome = genome,
-    motif = pum,
-    method = "universalmotif",
-    motif_name = "PUM_PRE",
-    window = 250,
-    set_col = "match_set"
-  )
-}
+matched_kmer <- match_background(
+  combined,
+  label_col = "label",
+  meta_col = "metagene_split3",
+  meta_tol = 0.03,
+  enforce_meta_tol = TRUE,
+  bin_match = TRUE,
+  kmer_match = TRUE,
+  kmer_col = "kmer",
+  seed = 1L
+)
+
+matched_kmer_sets <- subset_matched_sets(matched_kmer)
+plot_kmer_counts(matched_kmer_sets, set_col = "match_set", top_n = 25)
+```
+
+## Useful output helpers
+
+```r
+# Small table with the main fields.
+basic <- as_basic_site_table(ann)
+
+# Full table with all metadata columns.
+full <- as_site_table(ann, columns = "all")
+
+# Matched rows only, for plotting or export.
+matched_sets <- subset_matched_sets(matched)
 ```
