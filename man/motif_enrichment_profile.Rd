@@ -29,7 +29,8 @@ motif_enrichment_profile(
   drop_edge_positions = FALSE,
   edge_trim = NULL,
   center_exclude = 0L,
-  window_mode = c("auto", "transcript", "genomic"),
+  normalise_per = 1000L,
+  window_mode = c("genomic", "transcript", "auto"),
   txdb = NULL,
   resources = NULL,
   tx_name_col = "tx_name",
@@ -78,7 +79,7 @@ for strand-oriented transcript/RNA motifs.}
 
 \item{seqstyle}{Optional seqlevel style passed to the internal sequence-extraction step.}
 
-\item{chrs}{Optional seqlevels to keep for sequence extraction.}
+\item{chrs}{Optional seqlevels to keep for sequence extraction. Usually not needed if \code{gr} and \code{genome} already have matching seqlevels.}
 
 \item{drop_unstranded}{If TRUE, omit sites on '*' strand because RNA-oriented
 motif profiles require a transcript strand.}
@@ -90,10 +91,12 @@ value is interpreted as the number of bp/nt to trim from each edge.}
 \item{edge_trim}{Integer number of bp/nt to omit from each edge of the profile.}
 
 \item{center_exclude}{Integer number of bp/nt around the central site to omit
-from the profile.}
+from the profile. Defaults to 0.}
 
-\item{window_mode}{\code{"auto"}, \code{"transcript"}, or \code{"genomic"}.
-Use \code{"transcript"} for spliced RNA windows around annotated sites.}
+\item{normalise_per}{Scale factor for the returned normalised rates. For example, 1000 reports motif hits per 1000 sites.}
+
+\item{window_mode}{\code{"genomic"}, \code{"transcript"}, or \code{"auto"}.
+The default is \code{"genomic"}, which follows the input GRanges directly. Use \code{"transcript"} only when you explicitly want spliced RNA windows around annotated sites.}
 
 \item{txdb}{Optional \code{TxDb}; used to build transcript resources if
 \code{resources} is not supplied.}
@@ -111,10 +114,13 @@ and hits per site.
 }
 \description{
 Counts motif hits in strand-oriented windows centred on each site and returns
-a per-position profile. By default, if transcript resources are supplied, the
-function extracts spliced transcript/RNA windows using \code{tx_name} and
-\code{tx_pos}; otherwise it falls back to contiguous genomic windows with a
-warning. Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA
-U is converted to DNA T. Objects from the universalmotif package are scanned
-with \code{universalmotif::scan_sequences()}.
+a per-position profile. The default uses contiguous genomic windows extracted
+directly from the input \code{GRanges} with \code{BSgenome::getSeq()};
+because the strand is retained, reverse-strand sites are returned in their
+RNA/transcript orientation. Character motifs are treated as exact/IUPAC DNA
+or RNA patterns; RNA U is converted to DNA T. Set \code{method =
+"universalmotif"} to scan consensus/PWM motifs with
+\code{universalmotif::scan_sequences()}, or set \code{window_mode =
+"transcript"} with transcript resources for explicit spliced-transcript
+windows.
 }

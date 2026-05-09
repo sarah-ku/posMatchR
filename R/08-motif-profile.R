@@ -91,6 +91,19 @@
   patterns
 }
 
+.posmatchr_make_universalmotif_from_character <- function(motif, motif_name = NULL) {
+  if (!requireNamespace("universalmotif", quietly = TRUE)) {
+    stop("Package 'universalmotif' is required for universalmotif scanning. Install it with BiocManager::install('universalmotif').")
+  }
+  pats <- .posmatchr_normalize_iupac_patterns(motif)
+  nms <- .posmatchr_motif_names(motif, motif_name = motif_name)
+  if (length(nms) != length(pats)) nms <- pats
+  out <- lapply(seq_along(pats), function(i) {
+    universalmotif::create_motif(pats[i], alphabet = "DNA", name = nms[i])
+  })
+  if (length(out) == 1L) out[[1L]] else out
+}
+
 .posmatchr_prepare_genomic_motif_windows <- function(gr,
                                                      genome,
                                                      window,
@@ -428,12 +441,15 @@
 #' Compute a motif-enrichment profile around single-nucleotide sites
 #'
 #' Counts motif hits in strand-oriented windows centred on each site and returns
-#' a per-position profile. By default, if transcript resources are supplied, the
-#' function extracts spliced transcript/RNA windows using \code{tx_name} and
-#' \code{tx_pos}; otherwise it falls back to contiguous genomic windows with a
-#' warning. Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA
-#' U is converted to DNA T. Objects from the universalmotif package are scanned
-#' with \code{universalmotif::scan_sequences()}.
+#' a per-position profile. The default uses contiguous genomic windows extracted
+#' directly from the input \code{GRanges} with \code{BSgenome::getSeq()};
+#' because the strand is retained, reverse-strand sites are returned in their
+#' RNA/transcript orientation. Character motifs are treated as exact/IUPAC DNA
+#' or RNA patterns; RNA U is converted to DNA T. Set \code{method =
+#' "universalmotif"} to scan consensus/PWM motifs with
+#' \code{universalmotif::scan_sequences()}, or set \code{window_mode =
+#' "transcript"} with transcript resources for explicit spliced-transcript
+#' windows.
 #'
 #' @param gr A single-nucleotide \code{GRanges}. For matched-set comparisons, pass
 #'   \code{subset_matched_pairs(gr)} or use \code{matched_only = TRUE}.
@@ -457,7 +473,7 @@
 #' @param bin_size Position bin size in bp/nt.
 #' @param smooth_window Optional moving-average smoothing width in bins. Use 1 for no smoothing.
 #' @param seqstyle Optional seqlevel style passed to the internal sequence-extraction step.
-#' @param chrs Optional seqlevels to keep for sequence extraction.
+#' @param chrs Optional seqlevels to keep for sequence extraction. Usually not needed if `gr` and `genome` already have matching seqlevels.
 #' @param drop_unstranded If TRUE, omit sites on '*' strand because RNA-oriented
 #'   motif profiles require a transcript strand.
 #' @param drop_edge_positions Logical or integer. If TRUE, omit edge positions
@@ -465,9 +481,10 @@
 #'   value is interpreted as the number of bp/nt to trim from each edge.
 #' @param edge_trim Integer number of bp/nt to omit from each edge of the profile.
 #' @param center_exclude Integer number of bp/nt around the central site to omit
-#'   from the profile.
-#' @param window_mode \code{"auto"}, \code{"transcript"}, or \code{"genomic"}.
-#'   Use \code{"transcript"} for spliced RNA windows around annotated sites.
+#'   from the profile. Defaults to 0.
+#' @param normalise_per Scale factor for the returned normalised rates. For example, 1000 reports motif hits per 1000 sites.
+#' @param window_mode \code{"genomic"}, \code{"transcript"}, or \code{"auto"}.
+#'   The default is \code{"genomic"}, which follows the input GRanges directly. Use \code{"transcript"} only when you explicitly want spliced RNA windows around annotated sites.
 #' @param txdb Optional \code{TxDb}; used to build transcript resources if
 #'   \code{resources} is not supplied.
 #' @param resources Optional \code{build_tx_resources(txdb)} output. Supplying this
@@ -502,7 +519,8 @@ motif_enrichment_profile <- function(gr,
                                      drop_edge_positions = FALSE,
                                      edge_trim = NULL,
                                      center_exclude = 0L,
-                                     window_mode = c("auto", "transcript", "genomic"),
+                                     normalise_per = 1000L,
+                                     window_mode = c("genomic", "transcript", "auto"),
                                      txdb = NULL,
                                      resources = NULL,
                                      tx_name_col = "tx_name",
@@ -520,6 +538,8 @@ motif_enrichment_profile <- function(gr,
   center_exclude <- as.integer(center_exclude[1L])
   if (!is.finite(center_exclude) || center_exclude < 0L) stop("`center_exclude` must be a non-negative integer.")
   if (center_exclude >= window) stop("`center_exclude` must be smaller than `window`.")
+  normalise_per <- as.numeric(normalise_per[1L])
+  if (!is.finite(normalise_per) || normalise_per <= 0) stop("`normalise_per` must be a positive number.")
 
   if (matched_only && all(c("matched_negative_id", "matched_positive_id") %in% colnames(S4Vectors::mcols(gr)))) {
     gr <- subset_matched_pairs(gr, return_diagnostics = FALSE)
@@ -537,19 +557,8 @@ motif_enrichment_profile <- function(gr,
   gr <- gr[keep_group]
   group <- group[keep_group]
 
-  window_mode_auto <- window_mode == "auto"
-  if (window_mode_auto) {
+  if (window_mode == "auto") {
     window_mode <- if (!is.null(resources) || !is.null(txdb)) "transcript" else "genomic"
-  }
-
-  if (window_mode == "genomic" && window_mode_auto && is.null(resources) && is.null(txdb)) {
-    mc_now <- S4Vectors::mcols(gr)
-    if (all(c(tx_name_col, tx_pos_col) %in% colnames(mc_now))) {
-      warning(
-        "Using contiguous genomic motif windows despite transcript annotation being present. For RNA/spliced-transcript motif profiles, ",
-        "pass resources=build_tx_resources(txdb) or txdb=txdb and set window_mode='transcript'."
-      )
-    }
   }
 
   tmp_row_col <- ".posmatchr_motif_row"
@@ -595,6 +604,9 @@ motif_enrichment_profile <- function(gr,
       motif_names = motif_levels
     )
   } else {
+    if (is.character(motif)) {
+      motif <- .posmatchr_make_universalmotif_from_character(motif, motif_name = motif_name)
+    }
     hits <- .posmatchr_scan_universalmotif(
       seqs,
       motif = motif,
@@ -658,6 +670,9 @@ motif_enrichment_profile <- function(gr,
   prof$count[is.na(prof$count)] <- 0L
   prof <- merge(prof, n_sites, by = "group", all.x = TRUE, sort = FALSE)
   prof$hits_per_site <- prof$count / prof$n_sites
+  prof$hits_per_n_sites <- prof$hits_per_site * normalise_per
+  prof$hits_per_1000_sites <- prof$hits_per_site * 1000
+  prof$normalise_per <- normalise_per
   prof$window_mode <- window_mode
   prof <- prof[order(prof$motif, prof$group, prof$relative_position), , drop = FALSE]
 
@@ -677,6 +692,8 @@ motif_enrichment_profile <- function(gr,
   } else {
     prof$hits_per_site_smoothed <- prof$hits_per_site
   }
+  prof$hits_per_n_sites_smoothed <- prof$hits_per_site_smoothed * normalise_per
+  prof$hits_per_1000_sites_smoothed <- prof$hits_per_site_smoothed * 1000
 
   prof
 }
@@ -714,12 +731,13 @@ plot_motif_enrichment <- function(gr,
                                   drop_edge_positions = TRUE,
                                   edge_trim = NULL,
                                   center_exclude = 0L,
-                                  window_mode = c("auto", "transcript", "genomic"),
+                                  normalise_per = 1000L,
+                                  window_mode = c("genomic", "transcript", "auto"),
                                   txdb = NULL,
                                   resources = NULL,
                                   tx_name_col = "tx_name",
                                   tx_pos_col = "tx_pos",
-                                  y = c("hits_per_site_smoothed", "hits_per_site", "count"),
+                                  y = c("hits_per_n_sites_smoothed", "hits_per_n_sites", "hits_per_site_smoothed", "hits_per_site", "hits_per_1000_sites_smoothed", "hits_per_1000_sites", "count"),
                                   x_label = NULL,
                                   y_label = NULL) {
   y <- match.arg(y)
@@ -751,6 +769,7 @@ plot_motif_enrichment <- function(gr,
     drop_edge_positions = drop_edge_positions,
     edge_trim = edge_trim,
     center_exclude = center_exclude,
+    normalise_per = normalise_per,
     window_mode = window_mode,
     txdb = txdb,
     resources = resources,
@@ -763,7 +782,15 @@ plot_motif_enrichment <- function(gr,
   } else {
     prof$plot_segment <- "all"
   }
-  ylab <- y_label %||% if (y == "count") "Motif-hit count" else "Motif hits per site"
+  ylab <- y_label %||% if (y == "count") {
+    "Motif-hit count"
+  } else if (grepl("hits_per_n_sites", y)) {
+    paste0("Motif hits per ", format(normalise_per, scientific = FALSE, trim = TRUE), " sites")
+  } else if (grepl("1000", y)) {
+    "Motif hits per 1,000 sites"
+  } else {
+    "Motif hits per site"
+  }
   xlab <- x_label %||% if (unique(prof$window_mode)[1L] == "transcript") "Distance from site centre (nt; spliced transcript)" else "Distance from site centre (bp; genomic)"
 
   p <- ggplot2::ggplot(prof, ggplot2::aes(x = relative_position, y = y_plot, colour = group, linetype = motif, group = interaction(group, motif, plot_segment))) +
