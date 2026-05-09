@@ -1,5 +1,7 @@
 # posMatchR
 
+<img src="man/figures/logo.png" align="right" width="180" alt="posMatchR logo" />
+
 `posMatchR` annotates single-nucleotide `GRanges` sites with transcript context and constructs matched background site sets for post-transcriptional analyses such as m6A, A-to-I editing and precise RNA-binding maps.
 
 The expected input is a single-nucleotide `GRanges`. Wider ranges are resized to width 1 by `prepare_sites()` and `annotate_sites()`.
