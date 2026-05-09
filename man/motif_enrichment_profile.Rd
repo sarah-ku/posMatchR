@@ -28,7 +28,12 @@ motif_enrichment_profile(
   drop_unstranded = TRUE,
   drop_edge_positions = FALSE,
   edge_trim = NULL,
-  center_exclude = 0L
+  center_exclude = 0L,
+  window_mode = c("auto", "transcript", "genomic"),
+  txdb = NULL,
+  resources = NULL,
+  tx_name_col = "tx_name",
+  tx_pos_col = "tx_pos"
 )
 }
 \arguments{
@@ -39,7 +44,7 @@ motif_enrichment_profile(
 
 \item{motif}{A character vector of exact/IUPAC motifs, or a universalmotif object/list.}
 
-\item{window}{Number of bp on each side of the site.}
+\item{window}{Number of bp/nt on each side of the site.}
 
 \item{set_col}{Optional grouping column. Defaults to \code{"match_set"} if present.}
 
@@ -67,7 +72,7 @@ for strand-oriented transcript/RNA motifs.}
 
 \item{nthreads}{Number of threads for universalmotif scanning.}
 
-\item{bin_size}{Position bin size in bp.}
+\item{bin_size}{Position bin size in bp/nt.}
 
 \item{smooth_window}{Optional moving-average smoothing width in bins. Use 1 for no smoothing.}
 
@@ -80,18 +85,25 @@ motif profiles require a transcript strand.}
 
 \item{drop_edge_positions}{Logical or integer. If TRUE, omit edge positions
 from the profile; if FALSE, keep them. For backward compatibility, an integer
-value is interpreted as the number of bp to trim from each edge.}
+value is interpreted as the number of bp/nt to trim from each edge.}
 
-\item{edge_trim}{Integer number of bp to omit from each edge of the profile.
-For example, with \code{window = 250} and \code{edge_trim = 2}, positions -250, -249,
-249, and 250 are omitted from the plotted/profile data while the plot axis
-can still display -250 and 250. If NULL, it is inferred from
-\code{drop_edge_positions}.}
+\item{edge_trim}{Integer number of bp/nt to omit from each edge of the profile.}
 
-\item{center_exclude}{Integer number of bp around the central site to omit
-from the profile. For example, \code{center_exclude = 10} removes positions -10
-through +10. This is useful when the direct modification motif should not
-dominate a flanking motif-enrichment display.}
+\item{center_exclude}{Integer number of bp/nt around the central site to omit
+from the profile.}
+
+\item{window_mode}{\code{"auto"}, \code{"transcript"}, or \code{"genomic"}.
+Use \code{"transcript"} for spliced RNA windows around annotated sites.}
+
+\item{txdb}{Optional \code{TxDb}; used to build transcript resources if
+\code{resources} is not supplied.}
+
+\item{resources}{Optional \code{build_tx_resources(txdb)} output. Supplying this
+is recommended for repeated motif profiles.}
+
+\item{tx_name_col}{Metadata column containing transcript names.}
+
+\item{tx_pos_col}{Metadata column containing one-based transcript coordinates.}
 }
 \value{
 A data.frame with relative position, group, motif, counts, site counts,
@@ -99,9 +111,10 @@ and hits per site.
 }
 \description{
 Counts motif hits in strand-oriented windows centred on each site and returns
-a per-position profile. Windows are extracted in transcript/RNA orientation:
-negative-strand sites are reverse-complemented by the sequence extraction step.
-Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA U is
-converted to DNA T. Objects from the
-universalmotif package are scanned with \code{universalmotif::scan_sequences()}.
+a per-position profile. By default, if transcript resources are supplied, the
+function extracts spliced transcript/RNA windows using \code{tx_name} and
+\code{tx_pos}; otherwise it falls back to contiguous genomic windows with a
+warning. Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA
+U is converted to DNA T. Objects from the universalmotif package are scanned
+with \code{universalmotif::scan_sequences()}.
 }

@@ -22,17 +22,28 @@
 }
 
 .posmatchr_motif_names <- function(motif, motif_name = NULL) {
-  if (!is.null(motif_name)) return(as.character(motif_name))
+  motif_len <- if (is.character(motif)) length(motif) else if (is.list(motif)) length(motif) else 1L
+
+  if (!is.null(motif_name)) {
+    motif_name <- as.character(motif_name)
+    if (length(motif_name) == motif_len) return(motif_name)
+    if (length(motif_name) == 1L && motif_len == 1L) return(motif_name)
+    if (length(motif_name) == 1L && motif_len > 1L) return(paste0(motif_name, "_", seq_len(motif_len)))
+    return(motif_name[seq_len(min(length(motif_name), motif_len))])
+  }
+
   if (is.character(motif)) {
     nms <- names(motif)
     if (!is.null(nms) && length(nms) == length(motif) && all(nzchar(nms))) return(as.character(nms))
     return(as.character(motif))
   }
+
   if (inherits(motif, "universalmotif")) {
     nm <- tryCatch(as.character(motif[["name"]]), error = function(e) NA_character_)
     if (length(nm) && !is.na(nm) && nzchar(nm)) return(nm)
     return("motif")
   }
+
   if (is.list(motif)) {
     nms <- names(motif)
     if (!is.null(nms) && length(nms) == length(motif) && all(nzchar(nms))) return(nms)
@@ -43,6 +54,7 @@
     }, character(1))
     return(out)
   }
+
   "motif"
 }
 
@@ -52,7 +64,39 @@
   "universalmotif"
 }
 
-.posmatchr_prepare_motif_windows <- function(gr, genome, window, seqstyle = NULL, chrs = NULL, drop_unstranded = TRUE) {
+.posmatchr_normalize_iupac_patterns <- function(patterns) {
+  patterns <- as.character(patterns)
+  patterns <- toupper(gsub("\\s+", "", patterns))
+  patterns <- chartr("U", "T", patterns)
+
+  ok <- !is.na(patterns) & nzchar(patterns)
+  if (!all(ok)) {
+    patterns <- patterns[ok]
+  }
+  if (!length(patterns)) stop("No non-empty motif patterns supplied.")
+
+  allowed <- c("A", "C", "G", "T", "R", "Y", "S", "W", "K", "M", "B", "D", "H", "V", "N")
+  bad <- vapply(patterns, function(p) {
+    chars <- strsplit(p, "", fixed = TRUE)[[1L]]
+    any(!(chars %in% allowed))
+  }, logical(1))
+  if (any(bad)) {
+    stop(
+      "Motif pattern(s) contain non-IUPAC DNA/RNA symbols after U->T conversion: ",
+      paste(patterns[bad], collapse = ", "),
+      ". Allowed symbols are A,C,G,T,U,R,Y,S,W,K,M,B,D,H,V,N."
+    )
+  }
+
+  patterns
+}
+
+.posmatchr_prepare_genomic_motif_windows <- function(gr,
+                                                     genome,
+                                                     window,
+                                                     seqstyle = NULL,
+                                                     chrs = NULL,
+                                                     drop_unstranded = TRUE) {
   gr <- prepare_sites(gr, label = NULL, strip_mcols = FALSE)
   window <- as.integer(window)
   if (!is.finite(window) || window < 1L) stop("`window` must be a positive integer.")
@@ -109,7 +153,138 @@
   if (!any(valid)) stop("No full-width motif windows could be extracted.")
   seqs <- Biostrings::getSeq(genome, win[valid])
   names(seqs) <- paste0("site_", which(valid))
-  list(gr = gr, valid = valid, seqs = seqs)
+  list(gr = gr, valid = valid, seqs = seqs, mode = "genomic")
+}
+
+.posmatchr_order_exons_for_transcript <- function(exons) {
+  if (!length(exons)) return(exons)
+  mc <- S4Vectors::mcols(exons)
+  if ("exon_rank" %in% colnames(mc)) {
+    rk <- suppressWarnings(as.integer(mc$exon_rank))
+    if (any(is.finite(rk))) return(exons[order(rk, na.last = TRUE)])
+  }
+  st <- as.character(GenomicRanges::strand(exons))[1L]
+  if (!is.na(st) && st == "-") {
+    exons[order(GenomicRanges::start(exons), decreasing = TRUE)]
+  } else {
+    exons[order(GenomicRanges::start(exons), decreasing = FALSE)]
+  }
+}
+
+.posmatchr_transcript_sequence <- function(tx_name, exons_by_tx, genome, cache) {
+  if (tx_name %in% names(cache)) return(list(seq = cache[[tx_name]], cache = cache))
+  exons <- exons_by_tx[[tx_name]]
+  if (!length(exons)) {
+    cache[[tx_name]] <- Biostrings::DNAString("")
+    return(list(seq = cache[[tx_name]], cache = cache))
+  }
+  exons <- .posmatchr_order_exons_for_transcript(exons)
+  seqs <- Biostrings::getSeq(genome, exons)
+  tx_seq <- Biostrings::DNAString(paste0(as.character(seqs), collapse = ""))
+  cache[[tx_name]] <- tx_seq
+  list(seq = tx_seq, cache = cache)
+}
+
+.posmatchr_prepare_transcript_motif_windows <- function(gr,
+                                                        genome,
+                                                        window,
+                                                        resources = NULL,
+                                                        txdb = NULL,
+                                                        tx_name_col = "tx_name",
+                                                        tx_pos_col = "tx_pos",
+                                                        seqstyle = NULL,
+                                                        chrs = NULL,
+                                                        drop_unstranded = TRUE) {
+  gr <- prepare_sites(gr, label = NULL, strip_mcols = FALSE)
+  window <- as.integer(window)
+  if (!is.finite(window) || window < 1L) stop("`window` must be a positive integer.")
+
+  if (is.null(resources)) {
+    if (is.null(txdb)) stop("Transcript-window motif scanning requires `resources` or `txdb`.")
+    resources <- build_tx_resources(txdb, include_introns = TRUE)
+  }
+  if (is.null(resources$exons_by_tx) || !length(resources$exons_by_tx)) {
+    stop("`resources` must contain `exons_by_tx`; use build_tx_resources(txdb).")
+  }
+
+  if (isTRUE(drop_unstranded)) {
+    st0 <- as.character(GenomicRanges::strand(gr))
+    keep_st <- st0 %in% c("+", "-")
+    if (!any(keep_st)) stop("No '+' or '-' stranded sites remain for strand-oriented motif scanning.")
+    gr <- gr[keep_st]
+  }
+
+  exons_by_tx <- resources$exons_by_tx
+  if (!is.null(seqstyle)) {
+    suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(exons_by_tx) <- seqstyle, silent = TRUE))
+    suppressWarnings(try(GenomeInfoDb::seqlevelsStyle(genome) <- seqstyle, silent = TRUE))
+  }
+
+  common <- intersect(GenomeInfoDb::seqlevels(exons_by_tx), GenomeInfoDb::seqlevels(genome))
+  if (!length(common)) {
+    exons_by_tx <- .rename_seqlevels_to_target(exons_by_tx, GenomeInfoDb::seqlevels(genome))
+    common <- intersect(GenomeInfoDb::seqlevels(exons_by_tx), GenomeInfoDb::seqlevels(genome))
+  }
+  if (!is.null(chrs)) {
+    common <- .map_to_target_seqlevels(chrs, common)$mapped
+  }
+  common <- unique(common[!is.na(common) & nzchar(common)])
+  if (!length(common)) {
+    stop(
+      "No common seqlevels between transcript exons and `genome`.\n",
+      "seqlevels(exons): ", paste(GenomeInfoDb::seqlevels(exons_by_tx), collapse = ", "), "\n",
+      "seqlevels(genome): ", paste(GenomeInfoDb::seqlevels(genome), collapse = ", ")
+    )
+  }
+  exons_by_tx <- GenomeInfoDb::keepSeqlevels(exons_by_tx, common, pruning.mode = "coarse")
+
+  mc <- S4Vectors::mcols(gr)
+  if (!(tx_name_col %in% colnames(mc))) {
+    stop("Transcript-window motif scanning requires a `", tx_name_col, "` metadata column. Run annotate_sites() first.")
+  }
+  if (!(tx_pos_col %in% colnames(mc))) {
+    if (tx_name_col == "tx_name") {
+      gr <- .add_transcript_position_geometry(gr, resources)
+      mc <- S4Vectors::mcols(gr)
+    }
+    if (!(tx_pos_col %in% colnames(mc))) {
+      stop("Transcript-window motif scanning requires a `", tx_pos_col, "` metadata column. Run annotate_sites() first.")
+    }
+  }
+
+  tx <- as.character(mc[[tx_name_col]])
+  tx_pos <- suppressWarnings(as.numeric(mc[[tx_pos_col]]))
+  valid <- !is.na(tx) & nzchar(tx) & tx %in% names(exons_by_tx) & is.finite(tx_pos)
+  if (!any(valid)) stop("No sites have a valid transcript name and transcript coordinate for transcript-window motif scanning.")
+
+  seq_out <- vector("list", length(gr))
+  cache <- list()
+  valid2 <- rep(FALSE, length(gr))
+  tx_valid <- tx[valid]
+  pos_valid <- as.integer(round(tx_pos[valid]))
+  idx_valid <- which(valid)
+
+  for (ii in seq_along(idx_valid)) {
+    idx <- idx_valid[ii]
+    txi <- tx_valid[ii]
+    res <- .posmatchr_transcript_sequence(txi, exons_by_tx = exons_by_tx, genome = genome, cache = cache)
+    tx_seq <- res$seq
+    cache <- res$cache
+    tx_len <- length(tx_seq)
+    p <- pos_valid[ii]
+    st <- p - window
+    en <- p + window
+    if (!is.finite(tx_len) || tx_len < (2L * window + 1L)) next
+    if (st < 1L || en > tx_len) next
+    seq_out[[idx]] <- Biostrings::subseq(tx_seq, start = st, end = en)
+    valid2[idx] <- TRUE
+  }
+
+  if (!any(valid2)) stop("No full-width transcript motif windows could be extracted. Sites may be too close to transcript ends.")
+  seq_chars <- vapply(seq_out[valid2], as.character, character(1))
+  seqs <- Biostrings::DNAStringSet(seq_chars)
+  names(seqs) <- paste0("site_", which(valid2))
+  list(gr = gr, valid = valid2, seqs = seqs, mode = "transcript")
 }
 
 .posmatchr_hit_position <- function(st, en, hit_position) {
@@ -123,12 +298,12 @@
 }
 
 .posmatchr_scan_iupac <- function(seqs, patterns, window, scan_rc = FALSE, hit_position = "center", motif_names = NULL) {
-  patterns <- toupper(gsub("U", "T", as.character(patterns)))
-  ok_patterns <- !is.na(patterns) & nzchar(patterns)
-  patterns <- patterns[ok_patterns]
-  if (!length(patterns)) stop("No non-empty motif patterns supplied.")
+  original_patterns <- as.character(patterns)
+  ok_patterns <- !is.na(original_patterns) & nzchar(gsub("\\s+", "", original_patterns))
+  patterns <- .posmatchr_normalize_iupac_patterns(original_patterns)
   if (is.null(motif_names)) motif_names <- patterns
-  motif_names <- as.character(motif_names)[ok_patterns]
+  motif_names <- as.character(motif_names)
+  if (length(motif_names) == length(original_patterns)) motif_names <- motif_names[ok_patterns]
   if (length(motif_names) != length(patterns)) motif_names <- patterns
 
   out <- list()
@@ -231,7 +406,7 @@
   if (!is.finite(bin_size) || bin_size < 1L) stop("`bin_size` must be a positive integer.")
   if (bin_size == 1L) return(as.numeric(round(x)))
   bins <- seq(-window, window, by = bin_size)
-  if (tail(bins, 1L) < window) bins <- c(bins, window)
+  if (utils::tail(bins, 1L) < window) bins <- c(bins, window)
   idx <- findInterval(x, bins, all.inside = TRUE)
   bins[idx]
 }
@@ -253,17 +428,18 @@
 #' Compute a motif-enrichment profile around single-nucleotide sites
 #'
 #' Counts motif hits in strand-oriented windows centred on each site and returns
-#' a per-position profile. Windows are extracted in transcript/RNA orientation:
-#' negative-strand sites are reverse-complemented by the sequence extraction step.
-#' Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA U is
-#' converted to DNA T. Objects from the
-#' universalmotif package are scanned with \code{universalmotif::scan_sequences()}.
+#' a per-position profile. By default, if transcript resources are supplied, the
+#' function extracts spliced transcript/RNA windows using \code{tx_name} and
+#' \code{tx_pos}; otherwise it falls back to contiguous genomic windows with a
+#' warning. Character motifs are treated as exact/IUPAC DNA or RNA patterns; RNA
+#' U is converted to DNA T. Objects from the universalmotif package are scanned
+#' with \code{universalmotif::scan_sequences()}.
 #'
 #' @param gr A single-nucleotide \code{GRanges}. For matched-set comparisons, pass
 #'   \code{subset_matched_pairs(gr)} or use \code{matched_only = TRUE}.
 #' @param genome A BSgenome-like object accepted by \code{Biostrings::getSeq()}.
 #' @param motif A character vector of exact/IUPAC motifs, or a universalmotif object/list.
-#' @param window Number of bp on each side of the site.
+#' @param window Number of bp/nt on each side of the site.
 #' @param set_col Optional grouping column. Defaults to \code{"match_set"} if present.
 #' @param positive_value Value in \code{set_col} marking matched positives.
 #' @param negative_value Value in \code{set_col} marking matched negatives.
@@ -278,7 +454,7 @@
 #' @param threshold Threshold passed to \code{universalmotif::scan_sequences()}.
 #' @param threshold_type Threshold type passed to \code{universalmotif::scan_sequences()}.
 #' @param nthreads Number of threads for universalmotif scanning.
-#' @param bin_size Position bin size in bp.
+#' @param bin_size Position bin size in bp/nt.
 #' @param smooth_window Optional moving-average smoothing width in bins. Use 1 for no smoothing.
 #' @param seqstyle Optional seqlevel style passed to the internal sequence-extraction step.
 #' @param chrs Optional seqlevels to keep for sequence extraction.
@@ -286,16 +462,18 @@
 #'   motif profiles require a transcript strand.
 #' @param drop_edge_positions Logical or integer. If TRUE, omit edge positions
 #'   from the profile; if FALSE, keep them. For backward compatibility, an integer
-#'   value is interpreted as the number of bp to trim from each edge.
-#' @param edge_trim Integer number of bp to omit from each edge of the profile.
-#'   For example, with `window = 250` and `edge_trim = 2`, positions -250, -249,
-#'   249, and 250 are omitted from the plotted/profile data while the plot axis
-#'   can still display -250 and 250. If NULL, it is inferred from
-#'   `drop_edge_positions`.
-#' @param center_exclude Integer number of bp around the central site to omit
-#'   from the profile. For example, `center_exclude = 10` removes positions -10
-#'   through +10. This is useful when the direct modification motif should not
-#'   dominate a flanking motif-enrichment display.
+#'   value is interpreted as the number of bp/nt to trim from each edge.
+#' @param edge_trim Integer number of bp/nt to omit from each edge of the profile.
+#' @param center_exclude Integer number of bp/nt around the central site to omit
+#'   from the profile.
+#' @param window_mode \code{"auto"}, \code{"transcript"}, or \code{"genomic"}.
+#'   Use \code{"transcript"} for spliced RNA windows around annotated sites.
+#' @param txdb Optional \code{TxDb}; used to build transcript resources if
+#'   \code{resources} is not supplied.
+#' @param resources Optional \code{build_tx_resources(txdb)} output. Supplying this
+#'   is recommended for repeated motif profiles.
+#' @param tx_name_col Metadata column containing transcript names.
+#' @param tx_pos_col Metadata column containing one-based transcript coordinates.
 #'
 #' @return A data.frame with relative position, group, motif, counts, site counts,
 #'   and hits per site.
@@ -323,11 +501,17 @@ motif_enrichment_profile <- function(gr,
                                      drop_unstranded = TRUE,
                                      drop_edge_positions = FALSE,
                                      edge_trim = NULL,
-                                     center_exclude = 0L) {
+                                     center_exclude = 0L,
+                                     window_mode = c("auto", "transcript", "genomic"),
+                                     txdb = NULL,
+                                     resources = NULL,
+                                     tx_name_col = "tx_name",
+                                     tx_pos_col = "tx_pos") {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   method <- match.arg(method)
   method <- .posmatchr_motif_method(motif, method)
   hit_position <- match.arg(hit_position)
+  window_mode <- match.arg(window_mode)
   window <- as.integer(window)
   bin_size <- as.integer(bin_size)
   smooth_window <- as.integer(smooth_window)
@@ -353,16 +537,47 @@ motif_enrichment_profile <- function(gr,
   gr <- gr[keep_group]
   group <- group[keep_group]
 
+  window_mode_auto <- window_mode == "auto"
+  if (window_mode_auto) {
+    window_mode <- if (!is.null(resources) || !is.null(txdb)) "transcript" else "genomic"
+  }
+
+  if (window_mode == "genomic" && window_mode_auto && is.null(resources) && is.null(txdb)) {
+    mc_now <- S4Vectors::mcols(gr)
+    if (all(c(tx_name_col, tx_pos_col) %in% colnames(mc_now))) {
+      warning(
+        "Using contiguous genomic motif windows despite transcript annotation being present. For RNA/spliced-transcript motif profiles, ",
+        "pass resources=build_tx_resources(txdb) or txdb=txdb and set window_mode='transcript'."
+      )
+    }
+  }
+
   tmp_row_col <- ".posmatchr_motif_row"
   S4Vectors::mcols(gr)[[tmp_row_col]] <- seq_along(gr)
-  prep <- .posmatchr_prepare_motif_windows(
-    gr,
-    genome = genome,
-    window = window,
-    seqstyle = seqstyle,
-    chrs = chrs,
-    drop_unstranded = drop_unstranded
-  )
+  prep <- if (window_mode == "transcript") {
+    .posmatchr_prepare_transcript_motif_windows(
+      gr,
+      genome = genome,
+      window = window,
+      resources = resources,
+      txdb = txdb,
+      tx_name_col = tx_name_col,
+      tx_pos_col = tx_pos_col,
+      seqstyle = seqstyle,
+      chrs = chrs,
+      drop_unstranded = drop_unstranded
+    )
+  } else {
+    .posmatchr_prepare_genomic_motif_windows(
+      gr,
+      genome = genome,
+      window = window,
+      seqstyle = seqstyle,
+      chrs = chrs,
+      drop_unstranded = drop_unstranded
+    )
+  }
+
   valid <- prep$valid
   seqs <- prep$seqs
   row_index <- as.integer(S4Vectors::mcols(prep$gr)[[tmp_row_col]])
@@ -397,7 +612,7 @@ motif_enrichment_profile <- function(gr,
 
   group_levels <- unique(group_valid)
   positions <- seq(-window, window, by = bin_size)
-  if (!length(positions) || tail(positions, 1L) != window) positions <- unique(c(positions, window))
+  if (!length(positions) || utils::tail(positions, 1L) != window) positions <- unique(c(positions, window))
   if (edge_trim > 0L) {
     positions <- positions[positions >= (-window + edge_trim) & positions <= (window - edge_trim)]
   }
@@ -443,6 +658,7 @@ motif_enrichment_profile <- function(gr,
   prof$count[is.na(prof$count)] <- 0L
   prof <- merge(prof, n_sites, by = "group", all.x = TRUE, sort = FALSE)
   prof$hits_per_site <- prof$count / prof$n_sites
+  prof$window_mode <- window_mode
   prof <- prof[order(prof$motif, prof$group, prof$relative_position), , drop = FALSE]
 
   if (is.finite(smooth_window) && smooth_window > 1L && nrow(prof)) {
@@ -498,12 +714,18 @@ plot_motif_enrichment <- function(gr,
                                   drop_edge_positions = TRUE,
                                   edge_trim = NULL,
                                   center_exclude = 0L,
+                                  window_mode = c("auto", "transcript", "genomic"),
+                                  txdb = NULL,
+                                  resources = NULL,
+                                  tx_name_col = "tx_name",
+                                  tx_pos_col = "tx_pos",
                                   y = c("hits_per_site_smoothed", "hits_per_site", "count"),
-                                  x_label = "Distance from site centre (bp)",
+                                  x_label = NULL,
                                   y_label = NULL) {
   y <- match.arg(y)
   method <- match.arg(method)
   hit_position <- match.arg(hit_position)
+  window_mode <- match.arg(window_mode)
   prof <- motif_enrichment_profile(
     gr = gr,
     genome = genome,
@@ -528,7 +750,12 @@ plot_motif_enrichment <- function(gr,
     drop_unstranded = drop_unstranded,
     drop_edge_positions = drop_edge_positions,
     edge_trim = edge_trim,
-    center_exclude = center_exclude
+    center_exclude = center_exclude,
+    window_mode = window_mode,
+    txdb = txdb,
+    resources = resources,
+    tx_name_col = tx_name_col,
+    tx_pos_col = tx_pos_col
   )
   prof$y_plot <- prof[[y]]
   if (center_exclude > 0L) {
@@ -537,12 +764,13 @@ plot_motif_enrichment <- function(gr,
     prof$plot_segment <- "all"
   }
   ylab <- y_label %||% if (y == "count") "Motif-hit count" else "Motif hits per site"
+  xlab <- x_label %||% if (unique(prof$window_mode)[1L] == "transcript") "Distance from site centre (nt; spliced transcript)" else "Distance from site centre (bp; genomic)"
 
   p <- ggplot2::ggplot(prof, ggplot2::aes(x = relative_position, y = y_plot, colour = group, linetype = motif, group = interaction(group, motif, plot_segment))) +
     ggplot2::geom_line(linewidth = 1, na.rm = TRUE) +
     ggplot2::geom_vline(xintercept = 0, linetype = 2) +
     ggplot2::scale_x_continuous(limits = c(-window, window), breaks = unique(c(-window, -round(window / 2), 0, round(window / 2), window))) +
-    ggplot2::labs(x = x_label, y = ylab, colour = NULL, linetype = "Motif") +
+    ggplot2::labs(x = xlab, y = ylab, colour = NULL, linetype = "Motif") +
     ggplot2::theme_bw()
 
   if (length(unique(prof$motif)) == 1L) {

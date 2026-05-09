@@ -29,8 +29,13 @@ plot_motif_enrichment(
   drop_edge_positions = TRUE,
   edge_trim = NULL,
   center_exclude = 0L,
+  window_mode = c("auto", "transcript", "genomic"),
+  txdb = NULL,
+  resources = NULL,
+  tx_name_col = "tx_name",
+  tx_pos_col = "tx_pos",
   y = c("hits_per_site_smoothed", "hits_per_site", "count"),
-  x_label = "Distance from site centre (bp)",
+  x_label = NULL,
   y_label = NULL
 )
 }
@@ -42,7 +47,7 @@ plot_motif_enrichment(
 
 \item{motif}{A character vector of exact/IUPAC motifs, or a universalmotif object/list.}
 
-\item{window}{Number of bp on each side of the site.}
+\item{window}{Number of bp/nt on each side of the site.}
 
 \item{set_col}{Optional grouping column. Defaults to \code{"match_set"} if present.}
 
@@ -70,7 +75,7 @@ for strand-oriented transcript/RNA motifs.}
 
 \item{nthreads}{Number of threads for universalmotif scanning.}
 
-\item{bin_size}{Position bin size in bp.}
+\item{bin_size}{Position bin size in bp/nt.}
 
 \item{smooth_window}{Optional moving-average smoothing width in bins. Use 1 for no smoothing.}
 
@@ -83,18 +88,25 @@ motif profiles require a transcript strand.}
 
 \item{drop_edge_positions}{Logical or integer. If TRUE, omit edge positions
 from the profile; if FALSE, keep them. For backward compatibility, an integer
-value is interpreted as the number of bp to trim from each edge.}
+value is interpreted as the number of bp/nt to trim from each edge.}
 
-\item{edge_trim}{Integer number of bp to omit from each edge of the profile.
-For example, with \code{window = 250} and \code{edge_trim = 2}, positions -250, -249,
-249, and 250 are omitted from the plotted/profile data while the plot axis
-can still display -250 and 250. If NULL, it is inferred from
-\code{drop_edge_positions}.}
+\item{edge_trim}{Integer number of bp/nt to omit from each edge of the profile.}
 
-\item{center_exclude}{Integer number of bp around the central site to omit
-from the profile. For example, \code{center_exclude = 10} removes positions -10
-through +10. This is useful when the direct modification motif should not
-dominate a flanking motif-enrichment display.}
+\item{center_exclude}{Integer number of bp/nt around the central site to omit
+from the profile.}
+
+\item{window_mode}{\code{"auto"}, \code{"transcript"}, or \code{"genomic"}.
+Use \code{"transcript"} for spliced RNA windows around annotated sites.}
+
+\item{txdb}{Optional \code{TxDb}; used to build transcript resources if
+\code{resources} is not supplied.}
+
+\item{resources}{Optional \code{build_tx_resources(txdb)} output. Supplying this
+is recommended for repeated motif profiles.}
+
+\item{tx_name_col}{Metadata column containing transcript names.}
+
+\item{tx_pos_col}{Metadata column containing one-based transcript coordinates.}
 
 \item{y}{Value to plot: \code{"hits_per_site"}, \code{"hits_per_site_smoothed"}, or \code{"count"}.}
 
