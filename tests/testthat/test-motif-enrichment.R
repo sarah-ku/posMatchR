@@ -1,4 +1,4 @@
-test_that("motif_enrichment_profile and plot_motif_enrichment work on a tiny genome", {
+test_that("site_enrichment_profile and plot_site_enrichment work on a tiny motif example", {
   skip_if_not_installed("Biostrings")
 
   seq <- paste(rep("C", 101), collapse = "")
@@ -12,22 +12,22 @@ test_that("motif_enrichment_profile and plot_motif_enrichment work on a tiny gen
   )
   S4Vectors::mcols(gr)$match_set <- c("positive", "matched_negative")
 
-  prof <- motif_enrichment_profile(
+  prof <- site_enrichment_profile(
     gr,
     genome = genome,
-    motif = "AAA",
+    query = "AAA",
     window = 10,
     hit_position = "center",
     smooth_window = 1
   )
 
-  expect_true(all(c("relative_position", "group", "motif", "count", "hits_per_site") %in% names(prof)))
+  expect_true(all(c("relative_position", "group", "feature", "count", "hits_per_site") %in% names(prof)))
   expect_true(any(prof$count[prof$group == "positive"] > 0))
 
-  p <- plot_motif_enrichment(
+  p <- plot_site_enrichment(
     gr,
     genome = genome,
-    motif = "AAA",
+    query = "AAA",
     window = 10,
     hit_position = "center",
     smooth_window = 1
@@ -47,10 +47,10 @@ test_that("motif_enrichment_profile can omit edge positions", {
   )
   S4Vectors::mcols(gr)$match_set <- "positive"
 
-  prof <- motif_enrichment_profile(
+  prof <- site_enrichment_profile(
     gr,
     genome = genome,
-    motif = "A",
+    query = "A",
     window = 10,
     smooth_window = 1,
     drop_edge_positions = TRUE
@@ -58,10 +58,10 @@ test_that("motif_enrichment_profile can omit edge positions", {
 
   expect_false(any(prof$relative_position %in% c(-10, 10)))
 
-  prof2 <- motif_enrichment_profile(
+  prof2 <- site_enrichment_profile(
     gr,
     genome = genome,
-    motif = "A",
+    query = "A",
     window = 10,
     smooth_window = 1,
     edge_trim = 3
@@ -70,10 +70,10 @@ test_that("motif_enrichment_profile can omit edge positions", {
   expect_false(any(prof2$relative_position %in% c(-10, -9, -8, 8, 9, 10)))
   expect_true(all(c(-7, 0, 7) %in% prof2$relative_position))
 
-  prof3 <- motif_enrichment_profile(
+  prof3 <- site_enrichment_profile(
     gr,
     genome = genome,
-    motif = "A",
+    query = "A",
     window = 10,
     smooth_window = 1,
     center_exclude = 2
@@ -111,10 +111,10 @@ test_that("motif_enrichment_profile can use spliced transcript windows and RNA/I
   S4Vectors::mcols(gr)$tx_name <- "tx1"
   S4Vectors::mcols(gr)$tx_pos <- 6L
 
-  prof_tx <- motif_enrichment_profile(
+  prof_tx <- site_enrichment_profile(
     gr,
     genome = genome,
-    motif = "CCTTT",
+    query = "CCTTT",
     window = 4,
     resources = resources,
     window_mode = "transcript",
@@ -123,10 +123,10 @@ test_that("motif_enrichment_profile can use spliced transcript windows and RNA/I
   expect_gt(sum(prof_tx$count), 0L)
   expect_equal(unique(prof_tx$window_mode), "transcript")
 
-  prof_u <- motif_enrichment_profile(
+  prof_u <- site_enrichment_profile(
     gr,
     genome = genome,
-    motif = "UUUUU",
+    query = "UUUUU",
     window = 4,
     resources = resources,
     window_mode = "transcript",
@@ -134,10 +134,10 @@ test_that("motif_enrichment_profile can use spliced transcript windows and RNA/I
   )
   expect_gt(sum(prof_u$count), 0L)
 
-  prof_genomic <- motif_enrichment_profile(
+  prof_genomic <- site_enrichment_profile(
     gr,
     genome = genome,
-    motif = "CCTTT",
+    query = "CCTTT",
     window = 4,
     window_mode = "genomic",
     smooth_window = 1
@@ -145,10 +145,10 @@ test_that("motif_enrichment_profile can use spliced transcript windows and RNA/I
   expect_equal(sum(prof_genomic$count), 0)
 
   expect_error(
-    motif_enrichment_profile(
+    site_enrichment_profile(
       gr,
       genome = genome,
-      motif = "UZX",
+      query = "UZX",
       window = 4,
       resources = resources,
       window_mode = "transcript"

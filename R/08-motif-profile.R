@@ -494,7 +494,8 @@
 #'
 #' @return A data.frame with relative position, group, motif, counts, site counts,
 #'   and hits per site.
-#' @export
+#' @noRd
+# Internal implementation used by site_enrichment_profile().
 motif_enrichment_profile <- function(gr,
                                      genome,
                                      motif,
@@ -706,7 +707,8 @@ motif_enrichment_profile <- function(gr,
 #' @param y_label Optional y-axis label.
 #'
 #' @return A ggplot object.
-#' @export
+#' @noRd
+# Internal implementation used by plot_site_enrichment().
 plot_motif_enrichment <- function(gr,
                                   genome,
                                   motif,
@@ -724,7 +726,7 @@ plot_motif_enrichment <- function(gr,
                                   threshold_type = "logodds",
                                   nthreads = 1L,
                                   bin_size = 1L,
-                                  smooth_window = 11L,
+                                  smooth_window = 7L,
                                   seqstyle = NULL,
                                   chrs = NULL,
                                   drop_unstranded = TRUE,
