@@ -13,7 +13,8 @@ plot_feature_width_bins(
   n_bins = 10,
   log1p_first = TRUE,
   facet_by_location = TRUE,
-  location_col = "location"
+  location_col = "location",
+  use_existing_bin_col = TRUE
 )
 }
 \arguments{

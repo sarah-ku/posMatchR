@@ -23,7 +23,7 @@ match_background(
   n_bins = 5L,
   bin_within = c("location", "global"),
   bin_mode = c("soft", "hard"),
-  bin_weight = 0.25,
+  bin_weight = 1,
   log_bin_cols = c("tx_len", "feature_width", "nearest_exon_junction_dist",
     "dist_from_feature_start", "dist_from_feature_end", "start_dist_tx", "stop_dist_tx",
     "start_dist", "stop_dist"),
@@ -64,7 +64,7 @@ but absent, \code{"metagene_prop"} is used when present.}
 
 \item{bin_mode}{\code{"soft"} adds a penalty; \code{"hard"} requires matching bins.}
 
-\item{bin_weight}{Weight for soft bin mismatch.}
+\item{bin_weight}{Weight for soft bin mismatch. The default gives geometry-bin differences similar influence to the metagene cost.}
 
 \item{log_bin_cols}{Columns log1p-transformed before binning.}
 

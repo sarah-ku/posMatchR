@@ -22,7 +22,7 @@
 #' @param n_bins Number of quantile bins.
 #' @param bin_within Compute quantile-bin cutoffs globally or separately within transcript region.
 #' @param bin_mode \code{"soft"} adds a penalty; \code{"hard"} requires matching bins.
-#' @param bin_weight Weight for soft bin mismatch.
+#' @param bin_weight Weight for soft bin mismatch. The default gives geometry-bin differences similar influence to the metagene cost.
 #' @param log_bin_cols Columns log1p-transformed before binning.
 #' @param seed Random seed for deterministic tie behaviour.
 #'
@@ -48,7 +48,7 @@ match_background <- function(gr,
                              n_bins = 5L,
                              bin_within = c("location", "global"),
                              bin_mode = c("soft", "hard"),
-                             bin_weight = 0.25,
+                             bin_weight = 1.0,
                              log_bin_cols = c(
                                "tx_len", "feature_width", "nearest_exon_junction_dist",
                                "dist_from_feature_start", "dist_from_feature_end",
@@ -177,77 +177,87 @@ match_background <- function(gr,
       N_sorted <- N[order(meta[N])]
       N_meta <- meta[N_sorted]
 
+      score_candidates <- function(pi, cand, x) {
+        cand <- cand[!neg_used[cand]]
+        if (!length(cand)) return(list(chosen = NA_integer_, n_considered = 0L))
+
+        md <- abs(meta[cand] - x)
+        if (!is.null(meta_tol) && is.finite(meta_tol) && meta_tol > 0 && enforce_meta_tol) {
+          keep_tol <- md <= meta_tol
+          cand <- cand[keep_tol]
+          md <- md[keep_tol]
+          if (!length(cand)) return(list(chosen = NA_integer_, n_considered = 0L))
+        }
+
+        meta_scale <- if (!is.null(meta_tol) && is.finite(meta_tol) && meta_tol > 0) meta_tol else 0.05
+        cost_meta <- md / meta_scale
+        cost <- cost_meta
+
+        if (bin_match && !is.null(bin_mat) && ncol(bin_mat) > 0L) {
+          bp <- bin_mat[pi, , drop = TRUE]
+          bn <- bin_mat[cand, , drop = FALSE]
+
+          if (bin_mode == "hard") {
+            ok <- rep(TRUE, nrow(bn))
+            for (jj in seq_len(ncol(bn))) {
+              ok <- ok & (bn[, jj] == bp[jj] | (is.na(bn[, jj]) & is.na(bp[jj])))
+            }
+            cand <- cand[ok]
+            md <- md[ok]
+            cost_meta <- cost_meta[ok]
+            bn <- bn[ok, , drop = FALSE]
+            if (!length(cand)) return(list(chosen = NA_integer_, n_considered = 0L))
+          }
+
+          denom <- max(1, n_bins - 1L)
+          bin_diff <- abs(sweep(bn, 2, bp, "-"))
+          cost_bin <- rowMeans(bin_diff / denom, na.rm = TRUE)
+          cost_bin[!is.finite(cost_bin)] <- 0
+          cost <- cost_meta + bin_weight * cost_bin
+        }
+
+        ord <- order(cost, md)
+        list(chosen = cand[ord[1L]], n_considered = length(cand))
+      }
+
       for (pi in P) {
         if (!is.na(matched_neg_for_pos[pi])) next
         if (!any(!neg_used[N_sorted])) break
 
         x <- meta[pi]
-        j <- findInterval(x, N_meta)
-        j <- max(1L, min(j, length(N_sorted)))
-        win <- max(10L, as.integer(meta_k))
         chosen <- NA_integer_
 
-        repeat {
-          half <- win %/% 2L
-          lo <- max(1L, j - half)
-          hi <- min(length(N_sorted), j + half)
-          cand <- N_sorted[lo:hi]
-          cand <- cand[!neg_used[cand]]
-
-          if (length(cand)) {
-            md <- abs(meta[cand] - x)
-            if (!is.null(meta_tol) && is.finite(meta_tol) && meta_tol > 0) {
-              in_tol <- which(md <= meta_tol)
-              if (length(in_tol)) {
-                cand <- cand[in_tol]
-                md <- md[in_tol]
-              } else if (enforce_meta_tol) {
-                cand <- integer(0)
-              }
-            }
-
-            if (length(cand)) {
-              meta_scale <- if (!is.null(meta_tol) && is.finite(meta_tol) && meta_tol > 0) meta_tol else 0.05
-              cost_meta <- md / meta_scale
-
-              if (bin_match && !is.null(bin_mat) && ncol(bin_mat) > 0L) {
-                bp <- bin_mat[pi, , drop = TRUE]
-                bn <- bin_mat[cand, , drop = FALSE]
-
-                if (bin_mode == "hard") {
-                  ok <- rep(TRUE, nrow(bn))
-                  for (jj in seq_len(ncol(bn))) {
-                    ok <- ok & (bn[, jj] == bp[jj] | (is.na(bn[, jj]) & is.na(bp[jj])))
-                  }
-                  cand <- cand[ok]
-                  md <- md[ok]
-                  cost_meta <- cost_meta[ok]
-                  bn <- bn[ok, , drop = FALSE]
-                }
-
-                if (length(cand)) {
-                  denom <- max(1, n_bins - 1L)
-                  bin_diff <- abs(sweep(bn, 2, bp, "-"))
-                  cost_bin <- rowMeans(bin_diff / denom, na.rm = TRUE)
-                  cost_bin[!is.finite(cost_bin)] <- 0
-                  cost <- cost_meta + bin_weight * cost_bin
-                } else {
-                  cost <- numeric(0)
-                }
-              } else {
-                cost <- cost_meta
-              }
-
-              if (length(cand)) {
-                ord <- order(cost, md)
-                chosen <- cand[ord[1L]]
-                break
-              }
-            }
+        # When a strict metagene tolerance is requested, score all unused
+        # candidates in the stratum that fall within that tolerance. This makes
+        # transcript-geometry bin penalties meaningful: a slightly more distant
+        # metagene neighbour can be preferred if it is much better matched in
+        # exon/transcript geometry. `meta_k` is only used as a computational
+        # shortcut when the tolerance is not being enforced.
+        if (!is.null(meta_tol) && is.finite(meta_tol) && meta_tol > 0 && enforce_meta_tol) {
+          lo <- findInterval(x - meta_tol, N_meta) + 1L
+          hi <- findInterval(x + meta_tol, N_meta)
+          lo <- max(1L, lo)
+          hi <- min(length(N_sorted), hi)
+          if (lo <= hi) {
+            cand <- N_sorted[lo:hi]
+            res <- score_candidates(pi, cand, x)
+            chosen <- res$chosen
           }
-
-          if (win >= length(N_sorted)) break
-          win <- min(length(N_sorted), win * 2L)
+        } else {
+          j <- findInterval(x, N_meta)
+          j <- max(1L, min(j, length(N_sorted)))
+          win <- max(10L, as.integer(meta_k))
+          repeat {
+            half <- win %/% 2L
+            lo <- max(1L, j - half)
+            hi <- min(length(N_sorted), j + half)
+            cand <- N_sorted[lo:hi]
+            res <- score_candidates(pi, cand, x)
+            chosen <- res$chosen
+            if (!is.na(chosen)) break
+            if (win >= length(N_sorted)) break
+            win <- min(length(N_sorted), win * 2L)
+          }
         }
 
         if (!is.na(chosen)) {

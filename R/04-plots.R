@@ -80,6 +80,8 @@
 #' @param negative_value Value in \code{set_col} marking matched negatives.
 #' @param facet_by_location If TRUE, facet by region.
 #' @param location_col Region column.
+#' @param use_existing_bin_col If TRUE, use a precomputed matcher bin column such
+#'   as \code{bin_feature_width} when present instead of recomputing bins for the plotted subset.
 #' @param bw_adjust Density bandwidth multiplier.
 #' @param xlim X-axis limits.
 #' @param x_axis Either \code{"regions"} to label the x-axis as 5'UTR/CDS/3'UTR
@@ -384,31 +386,52 @@ plot_feature_width_bins <- function(gr,
                                     n_bins = 10,
                                     log1p_first = TRUE,
                                     facet_by_location = TRUE,
-                                    location_col = "location") {
-  cols <- c(width_col, if (facet_by_location) location_col else NULL)
+                                    location_col = "location",
+                                    use_existing_bin_col = TRUE) {
+  existing_bin_col <- paste0("bin_", width_col)
+  has_existing_bin <- isTRUE(use_existing_bin_col) && existing_bin_col %in% colnames(S4Vectors::mcols(gr))
+  cols <- unique(c(width_col, if (has_existing_bin) existing_bin_col else NULL, if (facet_by_location) location_col else NULL))
   df <- .make_plot_df(gr, cols = cols, set_col = set_col,
                       positive_value = positive_value, negative_value = negative_value)
-  v <- suppressWarnings(as.numeric(df[[width_col]]))
-  if (log1p_first) v <- log1p(pmax(v, 0))
-  ok <- is.finite(v)
-  df <- df[ok, , drop = FALSE]
-  v <- v[ok]
-  if (!length(v)) stop("No finite values in ", width_col)
 
-  br <- stats::quantile(v, probs = seq(0, 1, length.out = n_bins + 1L), na.rm = TRUE, type = 7)
-  br <- unique(as.numeric(br))
-  if (length(br) < 2L) {
-    df$bin <- factor("all")
+  if (has_existing_bin) {
+    b <- suppressWarnings(as.integer(df[[existing_bin_col]]))
+    ok <- !is.na(b)
+    df <- df[ok, , drop = FALSE]
+    b <- b[ok]
+    if (!length(b)) stop("No finite existing bins in ", existing_bin_col)
+    df$bin <- factor(b, levels = sort(unique(b)))
   } else {
-    br[1] <- -Inf
-    br[length(br)] <- Inf
-    df$bin <- factor(cut(v, breaks = br, include.lowest = TRUE, labels = FALSE))
+    v <- suppressWarnings(as.numeric(df[[width_col]]))
+    if (log1p_first) v <- log1p(pmax(v, 0))
+    ok <- is.finite(v)
+    df <- df[ok, , drop = FALSE]
+    v <- v[ok]
+    if (!length(v)) stop("No finite values in ", width_col)
+
+    br <- stats::quantile(v, probs = seq(0, 1, length.out = n_bins + 1L), na.rm = TRUE, type = 7)
+    br <- unique(as.numeric(br))
+    if (length(br) < 2L) {
+      df$bin <- factor("all")
+    } else {
+      br[1] <- -Inf
+      br[length(br)] <- Inf
+      df$bin <- factor(cut(v, breaks = br, include.lowest = TRUE, labels = FALSE))
+    }
+  }
+
+  x_label <- if (has_existing_bin) {
+    paste0("Matcher bins of ", width_col)
+  } else if (log1p_first) {
+    paste0("Quantile bins of log1p(", width_col, ")")
+  } else {
+    paste0("Quantile bins of ", width_col)
   }
 
   p <- ggplot2::ggplot(df, ggplot2::aes(x = bin, fill = group)) +
     ggplot2::geom_bar(position = "dodge") +
     ggplot2::labs(
-      x = if (log1p_first) paste0("Quantile bins of log1p(", width_col, ")") else paste0("Quantile bins of ", width_col),
+      x = x_label,
       y = "Count",
       fill = NULL
     ) +
@@ -420,7 +443,7 @@ plot_feature_width_bins <- function(gr,
       ggplot2::geom_bar(position = "dodge") +
       ggplot2::facet_wrap(~ facet_location) +
       ggplot2::labs(
-        x = if (log1p_first) paste0("Quantile bins of log1p(", width_col, ")") else paste0("Quantile bins of ", width_col),
+        x = x_label,
         y = "Count",
         fill = NULL
       ) +

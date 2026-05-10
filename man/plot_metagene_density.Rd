@@ -42,6 +42,9 @@ plot_metagene_density(
 or \code{"numeric"} to show the numeric metagene coordinate.}
 
 \item{x_label}{Optional x-axis title.}
+
+\item{use_existing_bin_col}{If TRUE, use a precomputed matcher bin column such
+as \code{bin_feature_width} when present instead of recomputing bins for the plotted subset.}
 }
 \value{
 A ggplot object.
