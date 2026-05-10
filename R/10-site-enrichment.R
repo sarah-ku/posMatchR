@@ -58,12 +58,6 @@
 #'   Defaults to 0.
 #' @param normalise_per Scale factor for normalised rates. For example, 1000
 #'   reports occurrences per 1000 focal sites.
-#' @param window_mode For motif queries only: "genomic", "transcript", or
-#'   "auto". The default genomic mode follows the input GRanges directly.
-#' @param txdb Optional TxDb for transcript-window motif scanning.
-#' @param resources Optional build_tx_resources(txdb) output for transcript-window motif scanning.
-#' @param tx_name_col Transcript-name metadata column for transcript-window motif scanning.
-#' @param tx_pos_col Transcript-position metadata column for transcript-window motif scanning.
 #'
 #' @return A data.frame with relative position, group, feature/query name, counts,
 #'   site counts, and normalised rates.
@@ -96,18 +90,11 @@ site_enrichment_profile <- function(gr,
                                     drop_edge_positions = FALSE,
                                     edge_trim = NULL,
                                     center_exclude = 0L,
-                                    normalise_per = 1000L,
-                                    window_mode = c("genomic", "transcript", "auto"),
-                                    txdb = NULL,
-                                    resources = NULL,
-                                    tx_name_col = "tx_name",
-                                    tx_pos_col = "tx_pos") {
+                                    normalise_per = 1000L) {
   query_type <- match.arg(query_type)
   method <- match.arg(method)
   hit_position <- match.arg(hit_position)
   feature_position <- match.arg(feature_position)
-  window_mode <- match.arg(window_mode)
-
   if (query_type == "auto") {
     if (inherits(query, "GRanges") || (is.list(query) && all(vapply(query, inherits, logical(1), what = "GRanges")))) {
       query_type <- "features"
@@ -173,12 +160,7 @@ site_enrichment_profile <- function(gr,
     drop_edge_positions = drop_edge_positions,
     edge_trim = edge_trim,
     center_exclude = center_exclude,
-    normalise_per = normalise_per,
-    window_mode = window_mode,
-    txdb = txdb,
-    resources = resources,
-    tx_name_col = tx_name_col,
-    tx_pos_col = tx_pos_col
+    normalise_per = normalise_per
   )
   names(prof)[names(prof) == "motif"] <- "feature"
   prof$query_type <- "motif"
@@ -228,11 +210,6 @@ plot_site_enrichment <- function(gr,
                                  edge_trim = NULL,
                                  center_exclude = 0L,
                                  normalise_per = 1000L,
-                                 window_mode = c("genomic", "transcript", "auto"),
-                                 txdb = NULL,
-                                 resources = NULL,
-                                 tx_name_col = "tx_name",
-                                 tx_pos_col = "tx_pos",
                                  y = c("hits_per_n_sites_smoothed", "hits_per_n_sites", "hits_per_site_smoothed", "hits_per_site", "hits_per_1000_sites_smoothed", "hits_per_1000_sites", "signal_per_n_sites_smoothed", "signal_per_n_sites", "signal_per_site_smoothed", "signal_per_site", "count", "signal"),
                                  x_label = NULL,
                                  y_label = NULL) {
@@ -240,7 +217,6 @@ plot_site_enrichment <- function(gr,
   method <- match.arg(method)
   hit_position <- match.arg(hit_position)
   feature_position <- match.arg(feature_position)
-  window_mode <- match.arg(window_mode)
   y <- match.arg(y)
 
   prof <- site_enrichment_profile(
@@ -272,12 +248,7 @@ plot_site_enrichment <- function(gr,
     drop_edge_positions = drop_edge_positions,
     edge_trim = edge_trim,
     center_exclude = center_exclude,
-    normalise_per = normalise_per,
-    window_mode = window_mode,
-    txdb = txdb,
-    resources = resources,
-    tx_name_col = tx_name_col,
-    tx_pos_col = tx_pos_col
+    normalise_per = normalise_per
   )
 
   if (!(y %in% names(prof))) {

@@ -2,7 +2,7 @@
 % Please edit documentation in R/04-plots.R
 \name{plot_matching_pca}
 \alias{plot_matching_pca}
-\title{Plot a PCA diagnostic of matching covariates}
+\title{Plot a PCA or UMAP diagnostic of matching covariates}
 \usage{
 plot_matching_pca(
   gr,
@@ -18,7 +18,13 @@ plot_matching_pca(
   scale = TRUE,
   point_size = 0.8,
   alpha_unselected = 0.18,
-  alpha_highlight = 0.75
+  alpha_highlight = 0.75,
+  reduction = c("pca", "umap"),
+  colour_by = "status",
+  umap_n_neighbors = 15L,
+  umap_min_dist = 0.1,
+  umap_metric = "euclidean",
+  umap_n_threads = 1L
 )
 }
 \arguments{
@@ -50,12 +56,22 @@ and \code{metadata(gr)$match_diagnostics$bin_cols_used} when available.}
 \item{alpha_unselected}{Alpha for unselected negatives.}
 
 \item{alpha_highlight}{Alpha for matched positives/negatives.}
+
+\item{reduction}{Two-dimensional reduction to plot: \code{"pca"} or \code{"umap"}.}
+
+\item{colour_by}{Colour points by \code{"status"} or by a metadata column, e.g. \code{"location"}.}
+
+\item{umap_n_neighbors, umap_min_dist, umap_metric, umap_n_threads}{UMAP
+settings used when \code{reduction = "umap"}. The optional package
+\pkg{uwot} must be installed.}
 }
 \value{
 A ggplot object.
 }
 \description{
-Shows sites in the first two principal components of the numeric covariates
-used for matching. Matched positives and matched negatives are highlighted,
-while unselected negatives are shown as a light grey reference cloud.
+Shows sites in a two-dimensional representation of the numeric covariates
+used for matching. By default this is PCA. Set \code{reduction = "umap"}
+to use an optional UMAP representation. Matched positives and matched
+negatives are highlighted, while unselected negatives are shown as a light
+grey reference cloud.
 }

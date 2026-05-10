@@ -12,8 +12,6 @@ subset_matched_pairs(
   label_col = "label",
   strict_reciprocal = TRUE,
   drop_conflicts = TRUE,
-  maintain_testing = NULL,
-  testing_value = "testing",
   return_diagnostics = TRUE
 )
 }
@@ -31,10 +29,6 @@ subset_matched_pairs(
 \item{strict_reciprocal}{Require the negative to point back to the same positive.}
 
 \item{drop_conflicts}{Drop duplicated negative assignments.}
-
-\item{maintain_testing}{Optional split column; rows with \code{testing_value} are preserved raw.}
-
-\item{testing_value}{Split label(s) to preserve.}
 
 \item{return_diagnostics}{Store diagnostics in metadata.}
 }

@@ -34,11 +34,6 @@ plot_site_enrichment(
   edge_trim = NULL,
   center_exclude = 0L,
   normalise_per = 1000L,
-  window_mode = c("genomic", "transcript", "auto"),
-  txdb = NULL,
-  resources = NULL,
-  tx_name_col = "tx_name",
-  tx_pos_col = "tx_pos",
   y = c("hits_per_n_sites_smoothed", "hits_per_n_sites", "hits_per_site_smoothed",
     "hits_per_site", "hits_per_1000_sites_smoothed", "hits_per_1000_sites",
     "signal_per_n_sites_smoothed", "signal_per_n_sites", "signal_per_site_smoothed",
@@ -121,17 +116,6 @@ Defaults to 0.}
 
 \item{normalise_per}{Scale factor for normalised rates. For example, 1000
 reports occurrences per 1000 focal sites.}
-
-\item{window_mode}{For motif queries only: "genomic", "transcript", or
-"auto". The default genomic mode follows the input GRanges directly.}
-
-\item{txdb}{Optional TxDb for transcript-window motif scanning.}
-
-\item{resources}{Optional build_tx_resources(txdb) output for transcript-window motif scanning.}
-
-\item{tx_name_col}{Transcript-name metadata column for transcript-window motif scanning.}
-
-\item{tx_pos_col}{Transcript-position metadata column for transcript-window motif scanning.}
 
 \item{y}{Value to plot. The default plots smoothed occurrences per
 normalise_per focal sites.}

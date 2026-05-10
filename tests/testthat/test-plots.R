@@ -52,3 +52,29 @@ test_that("plot_matching_pca returns a ggplot on matched mock data", {
   p <- plot_matching_pca(out, max_unselected = 3L)
   expect_s3_class(p, "gg")
 })
+
+
+test_that("plot_matching_pca can optionally use UMAP", {
+  skip_if_not_installed("GenomicRanges")
+  skip_if_not_installed("IRanges")
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("uwot")
+
+  gr <- GenomicRanges::GRanges(
+    seqnames = rep("chr1", 8),
+    ranges = IRanges::IRanges(start = seq(100, 800, by = 100), width = 1),
+    strand = rep("+", 8)
+  )
+  names(gr) <- paste0("u", seq_along(gr))
+  S4Vectors::mcols(gr)$label <- c(1, 1, 1, 0, 0, 0, 0, 0)
+  S4Vectors::mcols(gr)$location <- c("coding", "coding", "threeUTR", "coding", "coding", "threeUTR", "coding", "threeUTR")
+  S4Vectors::mcols(gr)$metagene_split3 <- c(1.10, 1.55, 2.20, 1.11, 1.60, 2.18, 1.9, 2.7)
+  S4Vectors::mcols(gr)$nearest_exon_junction_dist <- c(5, 20, 10, 6, 18, 11, 100, 80)
+  S4Vectors::mcols(gr)$start_dist_tx <- c(30, 80, 180, 32, 79, 182, 220, 300)
+  S4Vectors::mcols(gr)$stop_dist_tx <- c(200, 140, 20, 202, 138, 19, 60, 40)
+  S4Vectors::mcols(gr)$feature_width <- c(100, 100, 80, 100, 90, 80, 120, 70)
+
+  out <- match_background(gr, bin_match = TRUE, return_diagnostics = TRUE)
+  p <- plot_matching_pca(out, reduction = "umap", max_unselected = 3L, umap_n_neighbors = 2L)
+  expect_s3_class(p, "gg")
+})

@@ -27,10 +27,7 @@ match_background(
   log_bin_cols = c("tx_len", "feature_width", "nearest_exon_junction_dist",
     "dist_from_feature_start", "dist_from_feature_end", "start_dist_tx", "stop_dist_tx",
     "start_dist", "stop_dist"),
-  seed = 1L,
-  split_col = NULL,
-  match_splits = NULL,
-  drop_na_split = TRUE
+  seed = 1L
 )
 }
 \arguments{
@@ -51,11 +48,11 @@ match_background(
 \item{meta_col}{Metagene coordinate column. If \code{"metagene_split3"} is requested
 but absent, \code{"metagene_prop"} is used when present.}
 
-\item{meta_tol}{Optional tolerance in metagene units.}
+\item{meta_tol}{Optional tolerance in metagene-coordinate units, not genomic bp.}
 
 \item{enforce_meta_tol}{If TRUE, leave positives unmatched when no candidate lies inside tolerance.}
 
-\item{meta_k}{Local search window size among metagene-sorted negatives.}
+\item{meta_k}{Initial number of candidate negatives to inspect around each positive in metagene-sorted order. This is a computational candidate-pool size, not a genomic bp window.}
 
 \item{bin_match}{If TRUE, use quantile-binned numeric covariates as secondary constraints.}
 
@@ -63,7 +60,7 @@ but absent, \code{"metagene_prop"} is used when present.}
 
 \item{n_bins}{Number of quantile bins.}
 
-\item{bin_within}{Bin globally or within region.}
+\item{bin_within}{Compute quantile-bin cutoffs globally or separately within transcript region.}
 
 \item{bin_mode}{\code{"soft"} adds a penalty; \code{"hard"} requires matching bins.}
 
@@ -72,19 +69,13 @@ but absent, \code{"metagene_prop"} is used when present.}
 \item{log_bin_cols}{Columns log1p-transformed before binning.}
 
 \item{seed}{Random seed for deterministic tie behaviour.}
-
-\item{split_col}{Optional split column; when provided, matching is constrained within split.}
-
-\item{match_splits}{Optional split labels to actively match.}
-
-\item{drop_na_split}{If TRUE, rows with missing split are ineligible when \code{split_col} is used.}
 }
 \value{
 A \code{GRanges} with canonical match columns.
 }
 \description{
 Greedily pairs each positive site to at most one unique negative/background site
-within hard strata such as region, optional k-mer, and optional split. Within each
+within hard strata such as transcript region and optional exact k-mer. Within each
 stratum, the primary cost is distance in a metagene coordinate; optional numeric
 covariates can be quantile-binned and used as soft or hard secondary constraints.
 }

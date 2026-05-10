@@ -1,7 +1,7 @@
 #' Match positive sites to a candidate background
 #'
 #' Greedily pairs each positive site to at most one unique negative/background site
-#' within hard strata such as region, optional k-mer, and optional split. Within each
+#' within hard strata such as transcript region and optional exact k-mer. Within each
 #' stratum, the primary cost is distance in a metagene coordinate; optional numeric
 #' covariates can be quantile-binned and used as soft or hard secondary constraints.
 #'
@@ -14,20 +14,17 @@
 #' @param kmer_col K-mer column.
 #' @param meta_col Metagene coordinate column. If \code{"metagene_split3"} is requested
 #'   but absent, \code{"metagene_prop"} is used when present.
-#' @param meta_tol Optional tolerance in metagene units.
+#' @param meta_tol Optional tolerance in metagene-coordinate units, not genomic bp.
 #' @param enforce_meta_tol If TRUE, leave positives unmatched when no candidate lies inside tolerance.
-#' @param meta_k Local search window size among metagene-sorted negatives.
+#' @param meta_k Initial number of candidate negatives to inspect around each positive in metagene-sorted order. This is a computational candidate-pool size, not a genomic bp window.
 #' @param bin_match If TRUE, use quantile-binned numeric covariates as secondary constraints.
 #' @param bin_cols Candidate numeric covariates to bin; missing columns are ignored.
 #' @param n_bins Number of quantile bins.
-#' @param bin_within Bin globally or within region.
+#' @param bin_within Compute quantile-bin cutoffs globally or separately within transcript region.
 #' @param bin_mode \code{"soft"} adds a penalty; \code{"hard"} requires matching bins.
 #' @param bin_weight Weight for soft bin mismatch.
 #' @param log_bin_cols Columns log1p-transformed before binning.
 #' @param seed Random seed for deterministic tie behaviour.
-#' @param split_col Optional split column; when provided, matching is constrained within split.
-#' @param match_splits Optional split labels to actively match.
-#' @param drop_na_split If TRUE, rows with missing split are ineligible when \code{split_col} is used.
 #'
 #' @return A \code{GRanges} with canonical match columns.
 #' @export
@@ -57,10 +54,7 @@ match_background <- function(gr,
                                "dist_from_feature_start", "dist_from_feature_end",
                                "start_dist_tx", "stop_dist_tx", "start_dist", "stop_dist"
                              ),
-                             seed = 1L,
-                             split_col = NULL,
-                             match_splits = NULL,
-                             drop_na_split = TRUE) {
+                             seed = 1L) {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   mc <- S4Vectors::mcols(gr)
 
@@ -88,25 +82,11 @@ match_background <- function(gr,
   loc <- as.character(mc[[location_col]])
   meta <- suppressWarnings(as.numeric(mc[[meta_col]]))
 
-  split_vec <- rep(NA_character_, length(gr))
-  split_ok <- rep(TRUE, length(gr))
-  if (!is.null(split_col)) {
-    if (!(split_col %in% colnames(mc))) stop("split_col='", split_col, "' not found in mcols(gr).")
-    split_vec <- as.character(mc[[split_col]])
-    if (drop_na_split) {
-      split_ok <- !is.na(split_vec) & nzchar(split_vec)
-    } else {
-      split_vec[is.na(split_vec) | !nzchar(split_vec)] <- "__unsplit__"
-      split_ok <- rep(TRUE, length(split_vec))
-    }
-    if (!is.null(match_splits)) split_ok <- split_ok & split_vec %in% as.character(match_splits)
-  }
-
   mc$loc_fiveUTR <- as.integer(loc == "fiveUTR")
   mc$loc_coding <- as.integer(loc == "coding")
   mc$loc_threeUTR <- as.integer(loc == "threeUTR")
 
-  in_scope <- !is.na(loc) & loc %in% locations & is.finite(meta) & split_ok
+  in_scope <- !is.na(loc) & loc %in% locations & is.finite(meta)
   pos_idx <- which(y == 1L & in_scope)
   neg_idx <- which(y == 0L & in_scope)
 
@@ -155,7 +135,7 @@ match_background <- function(gr,
         for (j in seq_along(cols_ok)) bin_mat[, j] <- quantile_bin(get_feat(cols_ok[j]), n_bins)
       } else {
         for (lv in locations) {
-          idx_lv <- which(loc == lv & loc %in% locations & split_ok)
+          idx_lv <- which(loc == lv & loc %in% locations)
           if (!length(idx_lv)) next
           for (j in seq_along(cols_ok)) {
             v <- get_feat(cols_ok[j])
@@ -181,8 +161,6 @@ match_background <- function(gr,
     } else {
       key <- loc
     }
-    if (!is.null(split_col)) key <- paste0(split_vec, "||", key)
-
     pos_by_key <- split(pos_idx, key[pos_idx], drop = TRUE)
     neg_by_key <- split(neg_idx, key[neg_idx], drop = TRUE)
     keys <- intersect(names(pos_by_key), names(neg_by_key))
@@ -317,10 +295,7 @@ match_background <- function(gr,
     bin_weight = bin_weight,
     meta_tol = meta_tol,
     enforce_meta_tol = enforce_meta_tol,
-    meta_k = as.integer(meta_k),
-    split_col = split_col,
-    match_splits = match_splits,
-    drop_na_split = drop_na_split
+    meta_k = as.integer(meta_k)
   )
 
   if (return_diagnostics) {
@@ -360,8 +335,6 @@ subset_bg_set <- function(gr,
 #' @param label_col Label column used if \code{is_positive_col} is absent.
 #' @param strict_reciprocal Require the negative to point back to the same positive.
 #' @param drop_conflicts Drop duplicated negative assignments.
-#' @param maintain_testing Optional split column; rows with \code{testing_value} are preserved raw.
-#' @param testing_value Split label(s) to preserve.
 #' @param return_diagnostics Store diagnostics in metadata.
 #'
 #' @return A paired \code{GRanges}.
@@ -373,8 +346,6 @@ subset_matched_pairs <- function(gr,
                                  label_col = "label",
                                  strict_reciprocal = TRUE,
                                  drop_conflicts = TRUE,
-                                 maintain_testing = NULL,
-                                 testing_value = "testing",
                                  return_diagnostics = TRUE) {
   if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
   gr <- prepare_sites(gr, label = NULL, label_col = label_col, strip_mcols = FALSE)
@@ -388,16 +359,7 @@ subset_matched_pairs <- function(gr,
     stop("strict_reciprocal=TRUE but missing `", matched_positive_id_col, "`.")
   }
 
-  testing_idx <- integer(0)
   work_idx <- seq_along(gr)
-  if (!is.null(maintain_testing)) {
-    if (!(maintain_testing %in% colnames(mc))) {
-      stop("maintain_testing='", maintain_testing, "' but column not found.")
-    }
-    split_vec <- as.character(mc[[maintain_testing]])
-    testing_idx <- which(!is.na(split_vec) & split_vec %in% testing_value)
-    work_idx <- setdiff(work_idx, testing_idx)
-  }
 
   if (!is.null(is_positive_col) && is_positive_col %in% colnames(mc)) {
     pos_flag <- .normalise_binary_label(mc[[is_positive_col]], strict = FALSE)
@@ -437,7 +399,7 @@ subset_matched_pairs <- function(gr,
     neg_idx <- neg_idx[ok3]
   }
 
-  keep_idx <- unique(c(pos_idx, neg_idx, testing_idx))
+  keep_idx <- unique(c(pos_idx, neg_idx))
   out <- gr[keep_idx]
 
   if (return_diagnostics) {
@@ -448,10 +410,7 @@ subset_matched_pairs <- function(gr,
       n_pairs_out_non_testing = length(pos_idx),
       expected_rows_out_non_testing = 2L * length(pos_idx),
       strict_reciprocal = strict_reciprocal,
-      drop_conflicts = drop_conflicts,
-      maintain_testing = maintain_testing,
-      testing_value = testing_value,
-      n_testing_in = length(testing_idx)
+      drop_conflicts = drop_conflicts
     )
     S4Vectors::metadata(out) <- md
   }
@@ -473,65 +432,4 @@ subset_matched_pairs <- function(gr,
 #' @export
 subset_matched_sets <- function(gr, ...) {
   subset_matched_pairs(gr, ...)
-}
-
-#' Assign train/test/validation split by chromosome
-#'
-#' @param gr A \code{GRanges}.
-#' @param split_col Output metadata column.
-#' @param test_chrs Chromosomes assigned to testing.
-#' @param val_chrs Chromosomes assigned to validation.
-#' @param train_label Training label.
-#' @param test_label Testing label.
-#' @param val_label Validation label.
-#' @param normalize_chr_prefix Try to harmonise \code{chr} prefix usage.
-#' @param warn_missing Warn if requested chromosomes are absent.
-#' @param overwrite If FALSE, error if \code{split_col} exists.
-#'
-#' @return \code{gr} with split column.
-#' @export
-assign_split_by_chromosome <- function(gr,
-                                       split_col = "split",
-                                       test_chrs = "chr9",
-                                       val_chrs = "chr20",
-                                       train_label = "training",
-                                       test_label = "testing",
-                                       val_label = "validation",
-                                       normalize_chr_prefix = TRUE,
-                                       warn_missing = TRUE,
-                                       overwrite = TRUE) {
-  if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
-  mc <- S4Vectors::mcols(gr)
-  if (!overwrite && split_col %in% colnames(mc)) stop("`", split_col, "` already exists.")
-
-  seqs <- as.character(GenomicRanges::seqnames(gr))
-
-  clean_chr <- function(x) {
-    x <- unique(as.character(x))
-    x[!is.na(x) & nzchar(x)]
-  }
-  test_chrs <- clean_chr(test_chrs)
-  val_chrs <- clean_chr(val_chrs)
-
-  if (length(intersect(test_chrs, val_chrs))) {
-    stop("Overlap between test_chrs and val_chrs is not allowed.")
-  }
-
-  if (normalize_chr_prefix) {
-    target <- unique(seqs)
-    test_chrs <- .map_to_target_seqlevels(test_chrs, target)$mapped
-    val_chrs <- .map_to_target_seqlevels(val_chrs, target)$mapped
-  }
-
-  if (warn_missing) {
-    if (length(setdiff(test_chrs, unique(seqs)))) warning("Absent test_chrs: ", paste(setdiff(test_chrs, unique(seqs)), collapse = ", "))
-    if (length(setdiff(val_chrs, unique(seqs)))) warning("Absent val_chrs: ", paste(setdiff(val_chrs, unique(seqs)), collapse = ", "))
-  }
-
-  split <- rep(train_label, length(gr))
-  split[seqs %in% test_chrs] <- test_label
-  split[seqs %in% val_chrs] <- val_label
-  mc[[split_col]] <- factor(split, levels = c(train_label, test_label, val_label))
-  S4Vectors::mcols(gr) <- mc
-  gr
 }

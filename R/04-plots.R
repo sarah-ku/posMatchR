@@ -652,16 +652,135 @@ matching_pca_data <- function(gr,
   out
 }
 
-#' Plot a PCA diagnostic of matching covariates
+
+.matching_umap_data <- function(gr,
+                                features = NULL,
+                                label_col = "label",
+                                set_col = "match_set",
+                                positive_value = "positive",
+                                negative_value = "matched_negative",
+                                max_unselected = 10000L,
+                                max_unmatched_positive = 5000L,
+                                seed = 1L,
+                                center = TRUE,
+                                scale = TRUE,
+                                n_neighbors = 15L,
+                                min_dist = 0.1,
+                                metric = "euclidean",
+                                n_threads = 1L) {
+  if (!requireNamespace("uwot", quietly = TRUE)) {
+    stop("UMAP matching diagnostics require the optional package 'uwot'. Install it with install.packages('uwot').")
+  }
+  if (!inherits(gr, "GRanges")) stop("`gr` must be a GRanges.")
+  gr <- prepare_sites(gr, label = NULL, label_col = label_col, strip_mcols = FALSE)
+  mc <- S4Vectors::mcols(gr)
+
+  features <- .default_matching_pca_features(gr, features = features)
+  if (!length(features)) stop("No matching diagnostic features available.")
+
+  status <- .matching_status(
+    gr,
+    label_col = label_col,
+    set_col = set_col,
+    positive_value = positive_value,
+    negative_value = negative_value
+  )
+
+  keep <- rep(FALSE, length(gr))
+  keep[status %in% c("matched_positive", "matched_negative")] <- TRUE
+
+  set.seed(seed)
+  idx_unselected <- which(status == "unselected_negative")
+  if (length(idx_unselected)) {
+    n <- min(length(idx_unselected), as.integer(max_unselected))
+    keep[.posmatchr_sample(idx_unselected, size = n)] <- TRUE
+  }
+
+  idx_unmatched_pos <- which(status == "unmatched_positive")
+  if (length(idx_unmatched_pos)) {
+    n <- min(length(idx_unmatched_pos), as.integer(max_unmatched_positive))
+    keep[.posmatchr_sample(idx_unmatched_pos, size = n)] <- TRUE
+  }
+
+  idx <- which(keep)
+  if (length(idx) < 4L) stop("Too few rows available for UMAP diagnostic plot.")
+
+  X <- .make_matching_pca_matrix(gr[idx], features = features)
+  ok <- stats::complete.cases(X)
+  if (!any(ok)) stop("No complete rows for UMAP after selecting features.")
+  X <- X[ok, , drop = FALSE]
+  idx <- idx[ok]
+
+  sds <- vapply(X, stats::sd, numeric(1), na.rm = TRUE)
+  keep_col <- is.finite(sds) & sds > 0
+  X <- X[, keep_col, drop = FALSE]
+  if (ncol(X) < 2L) stop("Fewer than two non-constant UMAP features remain.")
+  if (nrow(X) < 4L) stop("Too few complete rows remain for UMAP.")
+
+  X_mat <- as.matrix(X)
+  if (isTRUE(center) || isTRUE(scale)) {
+    X_mat <- base::scale(X_mat, center = center, scale = scale)
+  }
+  X_mat <- as.matrix(X_mat)
+  X_mat[!is.finite(X_mat)] <- 0
+
+  n_neighbors <- as.integer(n_neighbors[1L])
+  if (!is.finite(n_neighbors) || n_neighbors < 2L) n_neighbors <- 2L
+  n_neighbors <- min(n_neighbors, nrow(X_mat) - 1L)
+
+  set.seed(seed)
+  emb <- uwot::umap(
+    X_mat,
+    n_components = 2L,
+    n_neighbors = n_neighbors,
+    min_dist = min_dist,
+    metric = metric,
+    n_threads = n_threads,
+    n_sgd_threads = 1L,
+    verbose = FALSE
+  )
+
+  out <- data.frame(
+    row_index = idx,
+    site_id = names(gr)[idx],
+    UMAP1 = emb[, 1L],
+    UMAP2 = emb[, 2L],
+    status = status[idx],
+    label = .normalise_binary_label(mc[[label_col]], strict = TRUE)[idx],
+    match_set = if (!is.null(set_col) && set_col %in% colnames(mc)) as.character(mc[[set_col]][idx]) else NA_character_,
+    stringsAsFactors = FALSE
+  )
+  out$status <- factor(out$status, levels = levels(status))
+
+  attr(out, "features_used") <- colnames(X)
+  attr(out, "umap_parameters") <- list(
+    n_neighbors = n_neighbors,
+    min_dist = min_dist,
+    metric = metric,
+    center = center,
+    scale = scale,
+    seed = seed
+  )
+  out
+}
+
+#' Plot a PCA or UMAP diagnostic of matching covariates
 #'
-#' Shows sites in the first two principal components of the numeric covariates
-#' used for matching. Matched positives and matched negatives are highlighted,
-#' while unselected negatives are shown as a light grey reference cloud.
+#' Shows sites in a two-dimensional representation of the numeric covariates
+#' used for matching. By default this is PCA. Set \code{reduction = "umap"}
+#' to use an optional UMAP representation. Matched positives and matched
+#' negatives are highlighted, while unselected negatives are shown as a light
+#' grey reference cloud.
 #'
 #' @inheritParams matching_pca_data
 #' @param point_size Point size.
 #' @param alpha_unselected Alpha for unselected negatives.
 #' @param alpha_highlight Alpha for matched positives/negatives.
+#' @param reduction Two-dimensional reduction to plot: \code{"pca"} or \code{"umap"}.
+#' @param colour_by Colour points by \code{"status"} or by a metadata column, e.g. \code{"location"}.
+#' @param umap_n_neighbors,umap_min_dist,umap_metric,umap_n_threads UMAP
+#'   settings used when \code{reduction = "umap"}. The optional package
+#'   \pkg{uwot} must be installed.
 #'
 #' @return A ggplot object.
 #' @export
@@ -678,7 +797,38 @@ plot_matching_pca <- function(gr,
                               scale = TRUE,
                               point_size = 0.8,
                               alpha_unselected = 0.18,
-                              alpha_highlight = 0.75) {
+                              alpha_highlight = 0.75,
+                              reduction = c("pca", "umap"),
+                              colour_by = "status",
+                              umap_n_neighbors = 15L,
+                              umap_min_dist = 0.1,
+                              umap_metric = "euclidean",
+                              umap_n_threads = 1L) {
+  reduction <- match.arg(reduction)
+
+  if (reduction == "umap") {
+    df <- .matching_umap_data(
+      gr = gr,
+      features = features,
+      label_col = label_col,
+      set_col = set_col,
+      positive_value = positive_value,
+      negative_value = negative_value,
+      max_unselected = max_unselected,
+      max_unmatched_positive = max_unmatched_positive,
+      seed = seed,
+      center = center,
+      scale = scale,
+      n_neighbors = umap_n_neighbors,
+      min_dist = umap_min_dist,
+      metric = umap_metric,
+      n_threads = umap_n_threads
+    )
+    xcol <- "UMAP1"
+    ycol <- "UMAP2"
+    xl <- "UMAP1"
+    yl <- "UMAP2"
+  } else {
   df <- matching_pca_data(
     gr = gr,
     features = features,
@@ -695,6 +845,27 @@ plot_matching_pca <- function(gr,
   pct <- attr(df, "variance_explained")
   xl <- if (length(pct) >= 1L) paste0("PC1 (", round(100 * pct[1L], 1), "%)") else "PC1"
   yl <- if (length(pct) >= 2L) paste0("PC2 (", round(100 * pct[2L], 1), "%)") else "PC2"
+  xcol <- "PC1"
+  ycol <- "PC2"
+  }
+
+  df$x_plot <- df[[xcol]]
+  df$y_plot <- df[[ycol]]
+
+  if (!is.null(colour_by) && !identical(colour_by, "status")) {
+    mc_all <- S4Vectors::mcols(gr)
+    if (!(colour_by %in% colnames(mc_all))) {
+      stop("colour_by='", colour_by, "' was not found in mcols(gr).")
+    }
+    df$colour_value <- as.character(mc_all[[colour_by]][df$row_index])
+    df$colour_value[is.na(df$colour_value) | !nzchar(df$colour_value)] <- "missing"
+    return(
+      ggplot2::ggplot(df, ggplot2::aes(x = x_plot, y = y_plot, colour = colour_value)) +
+        ggplot2::geom_point(alpha = alpha_highlight, size = point_size) +
+        ggplot2::theme_bw() +
+        ggplot2::labs(x = xl, y = yl, colour = colour_by)
+    )
+  }
 
   bg <- df[df$status == "unselected_negative", , drop = FALSE]
   um <- df[df$status == "unmatched_positive", , drop = FALSE]
@@ -707,7 +878,7 @@ plot_matching_pca <- function(gr,
   if (nrow(bg)) {
     p <- p + ggplot2::geom_point(
       data = bg,
-      ggplot2::aes(x = PC1, y = PC2),
+      ggplot2::aes(x = x_plot, y = y_plot),
       colour = "grey80",
       alpha = alpha_unselected,
       size = point_size
@@ -717,7 +888,7 @@ plot_matching_pca <- function(gr,
   if (nrow(um)) {
     p <- p + ggplot2::geom_point(
       data = um,
-      ggplot2::aes(x = PC1, y = PC2),
+      ggplot2::aes(x = x_plot, y = y_plot),
       colour = "grey55",
       alpha = min(alpha_highlight, 0.35),
       size = point_size
@@ -727,7 +898,7 @@ plot_matching_pca <- function(gr,
   if (nrow(hi)) {
     p <- p + ggplot2::geom_point(
       data = hi,
-      ggplot2::aes(x = PC1, y = PC2, colour = status),
+      ggplot2::aes(x = x_plot, y = y_plot, colour = status),
       alpha = alpha_highlight,
       size = point_size
     )
