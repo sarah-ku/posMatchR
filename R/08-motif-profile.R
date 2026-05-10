@@ -104,6 +104,19 @@
   if (length(out) == 1L) out[[1L]] else out
 }
 
+.posmatchr_hit_position <- function(start, end, hit_position = c("center", "start", "end")) {
+  hit_position <- match.arg(hit_position)
+  start <- as.numeric(start)
+  end <- as.numeric(end)
+  switch(
+    hit_position,
+    start = start,
+    end = end,
+    center = floor((start + end) / 2),
+    stop("Unsupported hit_position.")
+  )
+}
+
 .posmatchr_prepare_genomic_motif_windows <- function(gr,
                                                      genome,
                                                      window,
