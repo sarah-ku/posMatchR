@@ -2,100 +2,129 @@
 
 <img src="man/figures/logo.png" align="right" width="180" alt="posMatchR logo" />
 
-`posMatchR` annotates single-nucleotide `GRanges` sites with transcript context and constructs matched background site sets for post-transcriptional analyses such as m6A, A-to-I editing and precise RNA-binding maps.
+`posMatchR` annotates single-nucleotide `GRanges` sites with transcript context and builds matched background sets for post-transcriptional point-site analyses.
 
-The expected input is a single-nucleotide `GRanges`. Wider ranges are resized to width 1 by `prepare_sites()` and `annotate_sites()`.
+The package expects single-nucleotide sites. Wider ranges are resized to width one by `prepare_sites()` and `annotate_sites()`.
 
 ## Installation
-
-Install the package from GitHub:
 
 ```r
 install.packages("remotes")
 remotes::install_github("sarah-ku/posMatchR")
 ```
 
-For the human hg38 examples below, install the required Bioconductor annotation packages:
+For the human hg38 example, install the required Bioconductor resources:
 
 ```r
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
-  install.packages("BiocManager")
+    install.packages("BiocManager")
 }
 
 BiocManager::install(c(
-  "GenomicRanges",
-  "GenomeInfoDb",
-  "TxDb.Hsapiens.UCSC.hg38.knownGene",
-  "org.Hs.eg.db",
-  "BSgenome.Hsapiens.UCSC.hg38"
+    "GenomicRanges",
+    "GenomicFeatures",
+    "VariantAnnotation",
+    "GenomeInfoDb",
+    "BSgenome",
+    "TxDb.Hsapiens.UCSC.hg38.knownGene",
+    "org.Hs.eg.db",
+    "BSgenome.Hsapiens.UCSC.hg38"
 ))
 ```
 
-For Arabidopsis examples, install the plant annotation packages:
+## Minimal GLORI example
 
-```r
-if (!requireNamespace("BiocManager", quietly = TRUE)) {
-  install.packages("BiocManager")
-}
-
-BiocManager::install(c(
-  "GenomicRanges",
-  "GenomeInfoDb",
-  "TxDb.Athaliana.BioMart.plantsmart51",
-  "org.At.tair.db",
-  "BSgenome.Athaliana.TAIR.TAIR9"
-))
-```
-
-## Basic human annotation workflow
-
-This example assumes that you already have a single-nucleotide `GRanges` object or an `.rds`/`.RData`/`.Rdat` file containing one. The example uses human hg38/UCSC chromosome names.
+This example uses the 25,000-site GLORI HEK293T `GRanges` object included in `inst/extdata/GLORI_HEK293T_25K.Rdat`. The workflow annotates the positive sites, builds a candidate background universe from foreground-observed centred 5-mers with at least 100 foreground instances, and matches positives to negatives with exact centred 5-mer matching.
 
 ```r
 library(posMatchR)
-library(GenomicRanges)
 library(GenomeInfoDb)
-library(TxDb.Hsapiens.UCSC.hg38.knownGene)
-library(org.Hs.eg.db)
-
-# Option 1: load a GRanges object from file.
-sites <- load_sites("path/to/sites.rds")
-
-# Option 2: if you already have a GRanges object, use it directly.
-# sites <- my_sites_granges
-
-human_chrs <- paste0("chr", c(1:22, "X", "Y"))
-
-# Standardise to width-1 sites and keep the main chromosomes.
-sites <- prepare_sites(sites)
-GenomeInfoDb::seqlevelsStyle(sites) <- "UCSC"
-sites <- GenomeInfoDb::keepSeqlevels(
-  sites,
-  human_chrs,
-  pruning.mode = "coarse"
-)
 
 txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
+genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+orgdb <- org.Hs.eg.db::org.Hs.eg.db
+human_chrs <- paste0("chr", c(1:22, "X", "Y"))
 
-ann <- annotate_sites(
-  gr = sites,
-  txdb = txdb,
-  seqstyle = "UCSC",
-  chrs = human_chrs,
-  tx_select = "longest",
-  orgdb = org.Hs.eg.db::org.Hs.eg.db,
-  gene_keytype = "ENTREZID",
-  gene_symbol_col = "SYMBOL",
-  gene_name_col = "GENENAME"
+sites <- load_sites(system.file(
+    "extdata", "GLORI_HEK293T_25K.Rdat",
+    package = "posMatchR",
+    mustWork = TRUE
+))
+
+resources <- build_tx_resources(txdb)
+
+sites <- annotate_sites(
+    gr = sites,
+    txdb = txdb,
+    resources = resources,
+    seqstyle = "UCSC",
+    chrs = human_chrs,
+    tx_select = "longest",
+    orgdb = orgdb,
+    gene_keytype = "ENTREZID",
+    gene_symbol_col = "SYMBOL",
+    gene_name_col = "GENENAME",
+    drop_unannotated = TRUE
 )
 
-# Compact table for inspection or export.
-basic <- as_basic_site_table(ann)
-head(basic)
+sites <- add_kmer(
+    gr = sites,
+    genome = genome,
+    k = 5,
+    out_col = "kmer",
+    seqstyle = "UCSC",
+    chrs = human_chrs
+)
 
-# Basic diagnostic plots.
-plot_metagene_density(ann)
-plot_junction_distance_density(ann)
+background <- make_kmer_universe(
+    foreground = sites,
+    txdb = txdb,
+    genome = genome,
+    kmer_col = "kmer",
+    min_count = 100,
+    scope = "transcripts",
+    regions = c("fiveUTR", "coding", "threeUTR"),
+    resources = resources,
+    exclude_foreground = TRUE
+)
+
+combined <- combine_site_sets(sites, background)
+combined <- annotate_sites(
+    gr = combined,
+    txdb = txdb,
+    resources = resources,
+    seqstyle = "UCSC",
+    chrs = human_chrs,
+    tx_select = "longest",
+    orgdb = orgdb,
+    gene_keytype = "ENTREZID",
+    gene_symbol_col = "SYMBOL",
+    gene_name_col = "GENENAME",
+    drop_unannotated = TRUE
+)
+combined <- add_kmer(combined, genome = genome, k = 5, seqstyle = "UCSC", chrs = human_chrs)
+
+matched <- match_background(
+    gr = combined,
+    kmer_match = TRUE,
+    kmer_col = "kmer",
+    bin_match = FALSE
+)
+matched_pairs <- subset_matched_sets(matched)
 ```
 
-The annotated `GRanges` keeps the original site coordinates and adds transcript, gene, region, metagene and local feature-geometry columns. For most reporting purposes, `as_basic_site_table()` gives a smaller table with the main annotations.
+Basic outputs:
+
+```r
+head(as_basic_site_table(sites))
+plot_metagene_density(sites)
+plot_junction_distance_density(sites)
+plot_kmer_counts(sites, top_n = 15)
+
+plot_metagene_density(matched_pairs)
+plot_junction_distance_density(matched_pairs)
+plot_kmer_counts(matched_pairs, top_n = 15)
+head(summarise_matched_kmer_balance(matched_pairs))
+```
+
+`matched_pairs` contains the reciprocal positive and matched-negative sites. When `kmer_match = TRUE`, each retained pair has the same centred 5-mer.

@@ -1,4 +1,4 @@
-globalVariables(c(
+utils::globalVariables(c(
   "x_plot", "group", "value", "which_distance", "bin", "kmer", "facet_location", "candidate_pattern", "candidate_kmer",
   "relative_position", "y_plot", "motif", "hits_per_site", "hits_per_site_smoothed", "count", "PC1", "PC2", "UMAP1", "UMAP2", "status", "plot_segment", "signal", "feature"
 ))

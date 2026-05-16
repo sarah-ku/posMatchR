@@ -80,8 +80,6 @@
 #' @param negative_value Value in \code{set_col} marking matched negatives.
 #' @param facet_by_location If TRUE, facet by region.
 #' @param location_col Region column.
-#' @param use_existing_bin_col If TRUE, use a precomputed matcher bin column such
-#'   as \code{bin_feature_width} when present instead of recomputing bins for the plotted subset.
 #' @param bw_adjust Density bandwidth multiplier.
 #' @param xlim X-axis limits.
 #' @param x_axis Either \code{"regions"} to label the x-axis as 5'UTR/CDS/3'UTR

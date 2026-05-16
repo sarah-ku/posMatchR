@@ -5,8 +5,11 @@
 ^README_files$
 ^doc$
 ^Meta$
-
+^__MACOSX$
+^\.DS_Store$
 ^REFACTOR_NOTES\.md$
 ^posmatchr_.*_smoke_results$
 ^_problems$
+^patch[0-9]+_unpacked$
+^posMatchR_refactored_patch.*\.tar\.gz$
 ^inst/examples/\.gitkeep$

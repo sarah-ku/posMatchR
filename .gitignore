@@ -1,7 +1,11 @@
 .Rproj.user
 .Rhistory
 .RData
-.Ruserdata
-inst/doc
-/doc/
-/Meta/
+.DS_Store
+*.tar.gz
+patch*_unpacked/
+posmatchr_*_smoke_results/
+_problems/
+doc/
+Meta/
+README_files/
