@@ -53,3 +53,13 @@ negative sampled from the same group, usually \code{gene_id} or \code{tx_name}.
 Setting \code{kmer_match = TRUE} additionally requires the same k-mer, which
 balances motif/k-mer frequencies among successfully matched pairs.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 60, by = 10), width = 1), strand = "+"
+)
+gr <- prepare_sites(gr, label = c(1, 1, 1, 0, 0, 0))
+S4Vectors::mcols(gr)$gene_id <- rep("gene1", length(gr))
+S4Vectors::mcols(gr)$kmer <- rep("GGACT", length(gr))
+match_random_background(gr, group_col = "gene_id", kmer_match = TRUE)
+
+}

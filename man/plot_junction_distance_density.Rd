@@ -23,3 +23,11 @@ A ggplot object.
 \description{
 Plot distance to nearest exon junction
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+)
+S4Vectors::mcols(gr)$nearest_exon_junction_dist <- seq(10, 100, by = 10)
+plot_junction_distance_density(gr, facet_by_location = FALSE)
+
+}

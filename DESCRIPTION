@@ -4,11 +4,11 @@ Title: Annotate Single-Nucleotide RNA Sites and Build Matched Backgrounds
 Version: 0.99.0
 Authors@R: person(
     "Sarah", "Rennie",
-    email = "sarah.rennie@gmail.com",
+    email = "sarah.rennie@bio.ku.dk",
     role = c("aut", "cre"),
     comment = c(ORCID = "0000-0001-9731-6957")
     )
-Description: posMatchR provides a downstream workflow for single-nucleotide RNA site maps represented as GRanges objects. The package annotates sites with gene, transcript-region, metagene, sequence-context, and local feature-distance variables using user-supplied Bioconductor annotation resources. These annotations can be used to visualise transcript context and to construct matched background sets for motif, point-feature, and related enrichment analyses.
+Description: Provides a downstream workflow for single-nucleotide RNA site maps represented as GRanges objects. Sites are annotated with gene, transcript-region, metagene, sequence-context, and local feature-distance variables using user-supplied Bioconductor annotation resources. These annotations can be used to visualise transcript context and to construct matched background sets for motif, point-feature, and related enrichment analyses.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -25,7 +25,8 @@ Imports:
     IRanges,
     GenomeInfoDb,
     Biostrings,
-    ggplot2
+    ggplot2,
+    withr
 Suggests:
     AnnotationDbi,
     BSgenome,

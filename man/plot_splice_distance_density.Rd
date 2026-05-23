@@ -45,3 +45,11 @@ A ggplot object.
 Uses \code{nearest_exon_junction_dist} when present. Otherwise it falls back to
 \code{min(dist_from_feature_start, dist_from_feature_end)}.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+)
+S4Vectors::mcols(gr)$nearest_exon_junction_dist <- seq(10, 100, by = 10)
+plot_splice_distance_density(gr, facet_by_location = FALSE)
+
+}

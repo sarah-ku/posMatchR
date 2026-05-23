@@ -16,6 +16,12 @@
 #' @param pruning.mode Passed to \code{GenomeInfoDb::keepSeqlevels()} and
 #'   seqlevel-renaming operations.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "1", IRanges::IRanges(10, width = 1), strand = "+"
+#' )
+#' standardize_seqlevels(gr, target = "chr1")
+#'
 #' @return \code{x} with renamed and optionally filtered seqlevels.
 #' @export
 standardize_seqlevels <- function(x,
@@ -57,6 +63,14 @@ standardize_seqlevels <- function(x,
 #' @param path Path to an \code{.rds}, \code{.RDS}, \code{.rda}, \code{.RData},
 #'   or \code{.Rdat} file.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(10, width = 1), strand = "+"
+#' )
+#' f <- tempfile(fileext = ".rds")
+#' saveRDS(gr, f)
+#' load_sites(f)
+#'
 #' @return A prepared single-nucleotide \code{GRanges}.
 #' @export
 load_sites <- function(path) {
@@ -94,6 +108,13 @@ load_sites <- function(path) {
 #'
 #' @param path Path to a BED file.
 #'
+#' @examples
+#' if (requireNamespace("rtracklayer", quietly = TRUE)) {
+#'     f <- tempfile(fileext = ".bed")
+#'     writeLines("chr1\t9\t10\tsite1\t0\t+", f)
+#'     import_bed_sites(f)
+#' }
+#'
 #' @return A prepared single-nucleotide \code{GRanges}.
 #' @export
 import_bed_sites <- function(path) {
@@ -119,6 +140,14 @@ import_bed_sites <- function(path) {
 #' @param gr An annotated \code{GRanges}.
 #' @param compatibility_names Passed to \code{as_site_table()}.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+#' )
+#' gr <- prepare_sites(gr)
+#' S4Vectors::mcols(gr)$location <- c("coding", "threeUTR")
+#' as_basic_site_table(gr)
+#'
 #' @return A compact data.frame.
 #' @export
 as_basic_site_table <- function(gr, compatibility_names = TRUE) {
@@ -135,6 +164,15 @@ as_basic_site_table <- function(gr, compatibility_names = TRUE) {
 #' @param gr An annotated \code{GRanges}.
 #' @param keep_cols Metadata columns to keep at top level.
 #' @param nested_col Name of the nested metadata column.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+#' )
+#' gr <- prepare_sites(gr)
+#' S4Vectors::mcols(gr)$location <- c("coding", "threeUTR")
+#' S4Vectors::mcols(gr)$gene_id <- c("gene1", "gene2")
+#' compact_site_mcols(gr)
 #'
 #' @return A \code{GRanges} with compacted metadata.
 #' @export

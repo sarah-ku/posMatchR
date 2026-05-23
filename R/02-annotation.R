@@ -1,4 +1,4 @@
-#' Annotate single-nucleotide sites with transcript context
+#' Annotate single-nucleotide sites from supplied single-width GRange with transcript context
 #'
 #' Assigns each site to a primary transcript/region using \code{VariantAnnotation::locateVariants()},
 #' attaches transcript-level metrics, computes metagene coordinates and feature distances,
@@ -24,6 +24,18 @@
 #' @param overwrite If FALSE, error when existing posMatchR annotation columns are present.
 #' @param cache Optional cache passed to \code{VariantAnnotation::locateVariants()}.
 #' @param quiet If TRUE, suppress non-critical progress messages.
+#'
+#' @examples
+#' if (interactive()) {
+#'     txdb <- get(
+#'         "TxDb.Hsapiens.UCSC.hg38.knownGene",
+#'         envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#'     )
+#'     gr <- GenomicRanges::GRanges(
+#'         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+#'     )
+#'     annotate_sites(gr, txdb = txdb)
+#' }
 #'
 #' @return An annotated \code{GRanges}.
 #' @export
@@ -270,6 +282,20 @@ annotate_sites <- function(gr,
 #'
 #' @param gr A \code{GRanges} with \code{location} and \code{tx_name} columns.
 #' @param resources Output of \code{\link{build_tx_resources}}.
+#'
+#' @examples
+#' if (interactive()) {
+#'     txdb <- get(
+#'         "TxDb.Hsapiens.UCSC.hg38.knownGene",
+#'         envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#'     )
+#'     resources <- build_tx_resources(txdb)
+#'     gr <- GenomicRanges::GRanges(
+#'         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+#'     )
+#'     gr <- annotate_sites(gr, txdb = txdb, resources = resources)
+#'     add_feature_geometry(gr, resources = resources)
+#' }
 #'
 #' @return The input \code{GRanges} with geometry columns added/replaced.
 #' @export
@@ -546,6 +572,18 @@ add_feature_geometry <- function(gr, resources) {
 #' @param make_unique_names If TRUE, make row names unique by appending transcript IDs.
 #' @param drop_unannotated If TRUE, return only overlapping rows.
 #'
+#' @examples
+#' if (interactive()) {
+#'     txdb <- get(
+#'         "TxDb.Hsapiens.UCSC.hg38.knownGene",
+#'         envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#'     )
+#'     gr <- GenomicRanges::GRanges(
+#'         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+#'     )
+#'     expand_sites_by_transcript(gr, txdb = txdb)
+#' }
+#'
 #' @return Expanded \code{GRanges}.
 #' @export
 expand_sites_by_transcript <- function(gr,
@@ -637,6 +675,20 @@ expand_sites_by_transcript <- function(gr,
 #' @param gr A \code{GRanges}.
 #' @param resources Output of \code{\link{build_tx_resources}}.
 #'
+#' @examples
+#' if (interactive()) {
+#'     txdb <- get(
+#'         "TxDb.Hsapiens.UCSC.hg38.knownGene",
+#'         envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#'     )
+#'     resources <- build_tx_resources(txdb)
+#'     gr <- GenomicRanges::GRanges(
+#'         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+#'     )
+#'     gr <- annotate_sites(gr, txdb = txdb, resources = resources)
+#'     add_metagene_split(gr, resources = resources)
+#' }
+#'
 #' @return \code{gr} with \code{metagene_split} and \code{metagene_split3} replaced.
 #' @export
 add_metagene_split <- function(gr, resources) {
@@ -708,6 +760,15 @@ add_metagene_split <- function(gr, resources) {
 #' @param out_col Output metadata column.
 #' @param seqstyle Optional sequence naming style.
 #' @param chrs Optional seqlevels to keep.
+#'
+#' @examples
+#' if (interactive()) {
+#'     genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+#'     gr <- GenomicRanges::GRanges(
+#'         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+#'     )
+#'     add_kmer(gr, genome = genome, k = 5)
+#' }
 #'
 #' @return \code{gr} with \code{out_col} added.
 #' @export
@@ -809,6 +870,14 @@ add_kmer <- function(gr,
 #' @param columns Either \code{"all"} or \code{"basic"}. \code{"basic"} keeps
 #'   coordinates, site ID, labels, region/gene/transcript fields, metagene position,
 #'   k-mer and matching identifiers when present.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+#' )
+#' gr <- prepare_sites(gr)
+#' S4Vectors::mcols(gr)$location <- c("coding", "threeUTR")
+#' as_site_table(gr, columns = "basic")
 #'
 #' @return A data.frame.
 #' @export

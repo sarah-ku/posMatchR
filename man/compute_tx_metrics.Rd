@@ -19,3 +19,14 @@ A data.frame with one row per transcript.
 \description{
 Computes transcript lengths and optional intron summaries from a \code{TxDb}.
 }
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    metrics <- compute_tx_metrics(txdb)
+    head(metrics)
+}
+
+}

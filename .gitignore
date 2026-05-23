@@ -9,3 +9,28 @@ _problems/
 doc/
 Meta/
 README_files/
+
+# R/session artefacts
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj.user/
+
+# macOS/system files
+.DS_Store
+
+# Package build/check artefacts
+*.tar.gz
+*.Rcheck/
+*.BiocCheck/
+posMatchR.Rcheck/
+posMatchR.BiocCheck/
+check/
+build/
+doc/
+Meta/
+
+# Temporary/unpacked patch directories
+patch*_unpacked/
+*_unpacked/

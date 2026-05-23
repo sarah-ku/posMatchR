@@ -53,3 +53,14 @@ negatives, unmatched positives, or unselected negatives. For large candidate
 universes, unselected negatives are sampled before PCA to keep the diagnostic
 plot manageable.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+)
+gr <- prepare_sites(gr, label = rep(c(1, 0), length.out = length(gr)))
+S4Vectors::mcols(gr)$match_set <- rep(c("positive", "matched_negative"), 5)
+S4Vectors::mcols(gr)$metagene_split3 <- seq(0.2, 2.8, length.out = length(gr))
+S4Vectors::mcols(gr)$feature_width <- seq(100, 1000, length.out = length(gr))
+matching_pca_data(gr, features = c("metagene_split3", "feature_width"))
+
+}

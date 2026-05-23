@@ -79,3 +79,14 @@ within hard strata such as transcript region and optional exact k-mer. Within ea
 stratum, the primary cost is distance in a metagene coordinate; optional numeric
 covariates can be quantile-binned and used as soft or hard secondary constraints.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 60, by = 10), width = 1), strand = "+"
+)
+gr <- prepare_sites(gr, label = c(1, 1, 1, 0, 0, 0))
+S4Vectors::mcols(gr)$location <- rep("coding", length(gr))
+S4Vectors::mcols(gr)$metagene_split3 <- seq(1.1, 1.6, length.out = length(gr))
+S4Vectors::mcols(gr)$kmer <- rep("GGACT", length(gr))
+match_background(gr, kmer_match = TRUE, bin_match = FALSE)
+
+}

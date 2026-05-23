@@ -24,3 +24,12 @@ Converts an annotated \code{GRanges} to a base \code{data.frame}. The default
 \code{columns = "all"} keeps all scalar metadata columns. \code{columns = "basic"}
 returns a smaller table intended for quick inspection and reporting.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+)
+gr <- prepare_sites(gr)
+S4Vectors::mcols(gr)$location <- c("coding", "threeUTR")
+as_site_table(gr, columns = "basic")
+
+}

@@ -19,3 +19,18 @@ Adds feature proportions, equal-width metagene coordinates, median/mean split me
 coordinates, transcript positions, distances to CDS start/stop, and distances to the
 nearest exon junction where available.
 }
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    resources <- build_tx_resources(txdb)
+    gr <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+    )
+    gr <- annotate_sites(gr, txdb = txdb, resources = resources)
+    add_feature_geometry(gr, resources = resources)
+}
+
+}

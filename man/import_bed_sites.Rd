@@ -17,3 +17,11 @@ Uses \code{rtracklayer::import()} to read a BED-like file as \code{GRanges},
 then applies \code{prepare_sites()}. BED coordinate conversion is handled by
 rtracklayer.
 }
+\examples{
+if (requireNamespace("rtracklayer", quietly = TRUE)) {
+    f <- tempfile(fileext = ".bed")
+    writeLines("chr1\t9\t10\tsite1\t0\t+", f)
+    import_bed_sites(f)
+}
+
+}

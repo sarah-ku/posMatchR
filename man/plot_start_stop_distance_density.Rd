@@ -38,3 +38,12 @@ A ggplot object.
 \description{
 Plot distances to CDS start and stop anchors
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+)
+S4Vectors::mcols(gr)$start_dist <- seq(10, 100, by = 10)
+S4Vectors::mcols(gr)$stop_dist <- rev(seq(10, 100, by = 10))
+plot_start_stop_distance_density(gr)
+
+}

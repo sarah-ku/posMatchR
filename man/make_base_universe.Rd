@@ -49,3 +49,18 @@ Finds all occurrences of one or more transcript-oriented bases, usually
 \code{GRanges}. For a negative-strand transcript, bases are interpreted in the
 transcript/RNA orientation, not the reference plus-strand orientation.
 }
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+    resources <- build_tx_resources(txdb)
+    foreground <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+    )
+    make_base_universe(foreground, txdb, genome, resources = resources)
+}
+
+}

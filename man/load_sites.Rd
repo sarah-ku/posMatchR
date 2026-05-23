@@ -19,3 +19,12 @@ A deliberately small file loader for examples and local smoke tests. For
 files, the file must contain exactly one \code{GRanges}; if it contains more
 than one, load it manually and pass the object to \code{prepare_sites()}.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(10, width = 1), strand = "+"
+)
+f <- tempfile(fileext = ".rds")
+saveRDS(gr, f)
+load_sites(f)
+
+}

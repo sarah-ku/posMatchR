@@ -59,6 +59,15 @@
 #' @param normalise_per Scale factor for normalised rates. For example, 1000
 #'   reports occurrences per 1000 focal sites.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(20, 40), width = 1), strand = c("+", "+")
+#' )
+#' features <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(22, 43), width = 1), strand = c("+", "+")
+#' )
+#' site_enrichment_profile(gr, query = features, window = 5, smooth_window = 1)
+#'
 #' @return A data.frame with relative position, group, feature/query name, counts,
 #'   site counts, and normalised rates.
 #' @export
@@ -178,6 +187,15 @@ site_enrichment_profile <- function(gr,
 #'   normalise_per focal sites.
 #' @param x_label Optional x-axis label.
 #' @param y_label Optional y-axis label.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(20, 40), width = 1), strand = c("+", "+")
+#' )
+#' features <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(22, 43), width = 1), strand = c("+", "+")
+#' )
+#' plot_site_enrichment(gr, query = features, window = 5, smooth_window = 1)
 #'
 #' @return A ggplot object.
 #' @export

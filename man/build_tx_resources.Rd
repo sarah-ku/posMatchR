@@ -28,3 +28,14 @@ A named list of transcript resources.
 Precomputes transcript lengths, feature-by-transcript structures, CDS anchors,
 exon-junction coordinates, and metagene-axis splits from a \code{TxDb}.
 }
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    resources <- build_tx_resources(txdb)
+    names(resources)
+}
+
+}

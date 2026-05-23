@@ -34,7 +34,7 @@ BiocManager::install(c(
 
 ## Minimal GLORI example
 
-This example uses the 25,000-site GLORI HEK293T `GRanges` object included in `inst/extdata/GLORI_HEK293T_25K.Rdat`. The workflow annotates the positive sites, builds a candidate background universe from foreground-observed centred 5-mers with at least 100 foreground instances, and matches positives to negatives with exact centred 5-mer matching.
+This example uses the bundled 25,000-site GLORI HEK293T `GRanges` object in `inst/extdata/GLORI_HEK293T_25K.Rdat`, restricted to the first 5,000 sites so the quick-start remains fast. The workflow annotates the positive sites, loads a precomputed human transcript-resource object, builds a candidate background universe from foreground-observed centred 5-mers with at least 100 foreground instances, and matches positives to negatives with exact centred 5-mer matching.
 
 ```r
 library(posMatchR)
@@ -50,8 +50,13 @@ sites <- load_sites(system.file(
     package = "posMatchR",
     mustWork = TRUE
 ))
+sites <- sites[seq_len(min(length(sites), 5000L))]
 
-resources <- build_tx_resources(txdb)
+resources <- readRDS(system.file(
+    "extdata", "hg38_knownGene_tx_resources_GLORI_demo.rds",
+    package = "posMatchR",
+    mustWork = TRUE
+))
 
 sites <- annotate_sites(
     gr = sites,

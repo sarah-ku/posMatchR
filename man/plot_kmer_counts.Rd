@@ -32,3 +32,11 @@ A ggplot object.
 \description{
 Plot k-mer counts
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 60, by = 10), width = 1), strand = "+"
+)
+S4Vectors::mcols(gr)$kmer <- c("GGACT", "GGACT", "AGACT", "AGACT", "AAACA", "AAACA")
+plot_kmer_counts(gr, top_n = 3)
+
+}

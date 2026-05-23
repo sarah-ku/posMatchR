@@ -28,3 +28,13 @@ posMatchR plotting and matching functions expect scalar columns such as
 \code{metagene_split3} to remain top-level columns, so compact after those steps
 rather than before them.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+)
+gr <- prepare_sites(gr)
+S4Vectors::mcols(gr)$location <- c("coding", "threeUTR")
+S4Vectors::mcols(gr)$gene_id <- c("gene1", "gene2")
+compact_site_mcols(gr)
+
+}

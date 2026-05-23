@@ -132,3 +132,13 @@ A single plotting interface for either motif enrichment or supplied point
 features such as iCLIP sites. Pass a motif string, e.g. "UNUNU", or pass a
 single-width GRanges object of feature sites.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(20, 40), width = 1), strand = c("+", "+")
+)
+features <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(22, 43), width = 1), strand = c("+", "+")
+)
+plot_site_enrichment(gr, query = features, window = 5, smooth_window = 1)
+
+}

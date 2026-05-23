@@ -34,3 +34,12 @@ A data.frame with positive and matched-negative counts by k-mer.
 \description{
 Summarise k-mer balance in matched sets
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+)
+S4Vectors::mcols(gr)$match_set <- c("positive", "matched_negative")
+S4Vectors::mcols(gr)$kmer <- c("GGACT", "GGACT")
+summarise_matched_kmer_balance(gr, subset_first = FALSE)
+
+}

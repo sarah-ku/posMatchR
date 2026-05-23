@@ -69,3 +69,16 @@ With only \code{sites} and \code{txdb}, it returns annotated sites. If
 \code{background} is supplied, positives and background candidates are combined,
 annotated, and matched.
 }
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    gr <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+    )
+    posmatchr_quickstart(gr, txdb = txdb)
+}
+
+}

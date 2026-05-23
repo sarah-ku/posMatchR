@@ -6,6 +6,16 @@
 #' @param include_introns If TRUE, compute intron counts and total intron lengths.
 #' @param introns_by_tx Optional \code{GRangesList} from \code{GenomicFeatures::intronsByTranscript()}.
 #'
+#' @examples
+#' if (interactive()) {
+#'     txdb <- get(
+#'         "TxDb.Hsapiens.UCSC.hg38.knownGene",
+#'         envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#'     )
+#'     metrics <- compute_tx_metrics(txdb)
+#'     head(metrics)
+#' }
+#'
 #' @return A data.frame with one row per transcript.
 #' @export
 compute_tx_metrics <- function(txdb, include_introns = TRUE, introns_by_tx = NULL) {
@@ -173,6 +183,16 @@ compute_tx_metrics <- function(txdb, include_introns = TRUE, introns_by_tx = NUL
 #' @param metagene_split_stat Either \code{"median"} or \code{"mean"} for estimating
 #'   proportional 5'UTR/CDS/3'UTR axis widths.
 #' @param metagene_require_cds If TRUE, use coding transcripts for split estimation.
+#'
+#' @examples
+#' if (interactive()) {
+#'     txdb <- get(
+#'         "TxDb.Hsapiens.UCSC.hg38.knownGene",
+#'         envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#'     )
+#'     resources <- build_tx_resources(txdb)
+#'     names(resources)
+#' }
 #'
 #' @return A named list of transcript resources.
 #' @export

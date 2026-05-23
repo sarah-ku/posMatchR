@@ -13,3 +13,8 @@
 ^patch[0-9]+_unpacked$
 ^posMatchR_refactored_patch.*\.tar\.gz$
 ^inst/examples/\.gitkeep$
+^\.Rhistory$
+^\.RData$
+^.*\.tar\.gz$
+^posMatchR\.Rcheck$
+^posMatchR\.BiocCheck$

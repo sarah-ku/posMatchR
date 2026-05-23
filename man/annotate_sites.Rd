@@ -2,7 +2,7 @@
 % Please edit documentation in R/02-annotation.R
 \name{annotate_sites}
 \alias{annotate_sites}
-\title{Annotate single-nucleotide sites with transcript context}
+\title{Annotate single-nucleotide sites from supplied single-width GRange with transcript context}
 \usage{
 annotate_sites(
   gr,
@@ -70,4 +70,17 @@ and optionally maps gene IDs to symbols/names via an OrgDb.
 \details{
 Existing user metadata are preserved by default. posMatchR-generated columns are replaced
 unless \code{overwrite = FALSE}.
+}
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    gr <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+    )
+    annotate_sites(gr, txdb = txdb)
+}
+
 }

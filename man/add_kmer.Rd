@@ -26,3 +26,13 @@ add_kmer(gr, genome, k = 5L, out_col = "kmer", seqstyle = NULL, chrs = NULL)
 Extracts a centred k-mer around each site from a genome object supported by
 \code{Biostrings::getSeq()}. Windows that cannot be extracted at full width are set to NA.
 }
+\examples{
+if (interactive()) {
+    genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+    gr <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+    )
+    add_kmer(gr, genome = genome, k = 5)
+}
+
+}

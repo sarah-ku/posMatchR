@@ -33,3 +33,13 @@ A labelled \code{GRanges}.
 Combines two \code{GRanges} objects into a single labelled object suitable for
 \code{\link{annotate_sites}} followed by \code{\link{match_background}}.
 }
+\examples{
+positives <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+)
+background <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(30, 40), width = 1), strand = "+"
+)
+combine_site_sets(positives, background)
+
+}

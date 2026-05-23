@@ -51,3 +51,18 @@ Scans transcript features for IUPAC DNA/RNA patterns such as \code{"DRACH"}.
 The point site is normally the centre of the motif, or a user-specified
 \code{site_offset}.
 }
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+    resources <- build_tx_resources(txdb)
+    foreground <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+    )
+    make_motif_universe(foreground, txdb, genome, "DRACH", resources)
+}
+
+}

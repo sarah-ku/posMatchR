@@ -51,3 +51,11 @@ Plots a density of annotated sites along a 0--3 metagene axis. If a match-set co
 is present, positives and matched negatives are shown separately; otherwise all sites
 are shown as one group.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+)
+S4Vectors::mcols(gr)$metagene_split3 <- seq(0.2, 2.8, length.out = length(gr))
+plot_metagene_density(gr)
+
+}

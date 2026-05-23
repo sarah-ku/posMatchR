@@ -26,6 +26,16 @@
 #' @param log_bin_cols Columns log1p-transformed before binning.
 #' @param seed Random seed for deterministic tie behaviour.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 60, by = 10), width = 1), strand = "+"
+#' )
+#' gr <- prepare_sites(gr, label = c(1, 1, 1, 0, 0, 0))
+#' S4Vectors::mcols(gr)$location <- rep("coding", length(gr))
+#' S4Vectors::mcols(gr)$metagene_split3 <- seq(1.1, 1.6, length.out = length(gr))
+#' S4Vectors::mcols(gr)$kmer <- rep("GGACT", length(gr))
+#' match_background(gr, kmer_match = TRUE, bin_match = FALSE)
+#'
 #' @return A \code{GRanges} with canonical match columns.
 #' @export
 match_background <- function(gr,
@@ -166,9 +176,8 @@ match_background <- function(gr,
     keys <- intersect(names(pos_by_key), names(neg_by_key))
     keys <- keys[!is.na(keys) & nzchar(keys)]
 
-    set.seed(seed)
-
-    for (kkey in keys) {
+    withr::with_seed(seed, {
+      for (kkey in keys) {
       P <- pos_by_key[[kkey]]
       N <- neg_by_key[[kkey]]
       if (!length(P) || !length(N)) next
@@ -268,6 +277,7 @@ match_background <- function(gr,
         }
       }
     }
+    })
   }
 
   mc$is_positive <- as.integer(y == 1L)
@@ -324,6 +334,15 @@ match_background <- function(gr,
 #' @param positive_value Value marking positives.
 #' @param negative_value Value marking matched negatives.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(10, 20, 30), width = 1), strand = "+"
+#' )
+#' S4Vectors::mcols(gr)$match_set <- c(
+#'     "positive", "matched_negative", "other"
+#' )
+#' subset_bg_set(gr)
+#'
 #' @return A subset \code{GRanges}.
 #' @export
 subset_bg_set <- function(gr,
@@ -346,6 +365,15 @@ subset_bg_set <- function(gr,
 #' @param strict_reciprocal Require the negative to point back to the same positive.
 #' @param drop_conflicts Drop duplicated negative assignments.
 #' @param return_diagnostics Store diagnostics in metadata.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+#' )
+#' gr <- prepare_sites(gr, label = c(1, 0))
+#' S4Vectors::mcols(gr)$matched_negative_id <- c(names(gr)[2], NA)
+#' S4Vectors::mcols(gr)$matched_positive_id <- c(NA, names(gr)[1])
+#' subset_matched_pairs(gr)
 #'
 #' @return A paired \code{GRanges}.
 #' @export
@@ -436,6 +464,15 @@ subset_matched_pairs <- function(gr,
 #' @param gr A \code{GRanges} returned by \code{match_background()} or
 #'   \code{match_random_background()}.
 #' @param ... Passed to \code{\link{subset_matched_pairs}}.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+#' )
+#' gr <- prepare_sites(gr, label = c(1, 0))
+#' S4Vectors::mcols(gr)$matched_negative_id <- c(names(gr)[2], NA)
+#' S4Vectors::mcols(gr)$matched_positive_id <- c(NA, names(gr)[1])
+#' subset_matched_sets(gr)
 #'
 #' @return A paired \code{GRanges} containing only matched positives and their
 #'   selected matched negatives.

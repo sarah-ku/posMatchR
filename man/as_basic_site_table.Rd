@@ -17,3 +17,12 @@ A compact data.frame.
 \description{
 Return a small display table for annotated sites
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+)
+gr <- prepare_sites(gr)
+S4Vectors::mcols(gr)$location <- c("coding", "threeUTR")
+as_basic_site_table(gr)
+
+}

@@ -19,3 +19,10 @@ The input \code{GRanges} with names, and optionally \code{site_id_col}, set.
 \description{
 Add coordinate-derived IDs to a GRanges
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+)
+makeID(gr)
+
+}

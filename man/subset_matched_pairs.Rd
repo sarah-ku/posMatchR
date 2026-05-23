@@ -38,3 +38,13 @@ A paired \code{GRanges}.
 \description{
 Subset to reciprocal matched positive/background pairs
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+)
+gr <- prepare_sites(gr, label = c(1, 0))
+S4Vectors::mcols(gr)$matched_negative_id <- c(names(gr)[2], NA)
+S4Vectors::mcols(gr)$matched_positive_id <- c(NA, names(gr)[1])
+subset_matched_pairs(gr)
+
+}

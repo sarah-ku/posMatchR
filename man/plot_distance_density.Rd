@@ -47,3 +47,11 @@ A ggplot object.
 \description{
 Plot a generic distance density
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+)
+S4Vectors::mcols(gr)$nearest_exon_junction_dist <- seq(10, 100, by = 10)
+plot_distance_density(gr, "nearest_exon_junction_dist", facet_by_location = FALSE)
+
+}

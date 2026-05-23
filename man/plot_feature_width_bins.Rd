@@ -35,10 +35,22 @@ plot_feature_width_bins(
 \item{facet_by_location}{If TRUE, facet by location.}
 
 \item{location_col}{Location column.}
+
+\item{use_existing_bin_col}{If TRUE, use an existing matcher bin column named
+\code{bin_<width_col>} when present; otherwise compute quantile bins from
+\code{width_col}.}
 }
 \value{
 A ggplot object.
 }
 \description{
 Plot feature-width quantile bins
+}
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+)
+S4Vectors::mcols(gr)$feature_width <- seq(100, 1000, length.out = length(gr))
+plot_feature_width_bins(gr, n_bins = 3, facet_by_location = FALSE)
+
 }

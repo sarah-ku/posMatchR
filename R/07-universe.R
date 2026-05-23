@@ -474,6 +474,20 @@
 #' @param tx_name_col Foreground transcript-name column.
 #' @param exclude_foreground If TRUE, remove coordinates already present in foreground.
 #'
+#' @examples
+#' if (interactive()) {
+#'     txdb <- get(
+#'         "TxDb.Hsapiens.UCSC.hg38.knownGene",
+#'         envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#'     )
+#'     genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+#'     resources <- build_tx_resources(txdb)
+#'     foreground <- GenomicRanges::GRanges(
+#'         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+#'     )
+#'     make_base_universe(foreground, txdb, genome, resources = resources)
+#' }
+#'
 #' @return Candidate background sites as \code{GRanges}.
 #' @export
 make_base_universe <- function(foreground,
@@ -519,6 +533,21 @@ make_base_universe <- function(foreground,
 #' @param min_count Drop foreground k-mers observed fewer than this many times.
 #' @param site_offset One-based position in the k-mer to use as the point site. NULL uses the centre.
 #' @inheritParams make_base_universe
+#'
+#' @examples
+#' if (interactive()) {
+#'     txdb <- get(
+#'         "TxDb.Hsapiens.UCSC.hg38.knownGene",
+#'         envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#'     )
+#'     genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+#'     resources <- build_tx_resources(txdb)
+#'     foreground <- GenomicRanges::GRanges(
+#'         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+#'     )
+#'     S4Vectors::mcols(foreground)$kmer <- "GGACT"
+#'     make_kmer_universe(foreground, txdb, genome, resources = resources)
+#' }
 #'
 #' @return Candidate background sites as \code{GRanges}.
 #' @export
@@ -575,6 +604,20 @@ make_kmer_universe <- function(foreground,
 #' @param site_offset One-based motif position to use as the point site. NULL uses the centre.
 #' @inheritParams make_base_universe
 #'
+#' @examples
+#' if (interactive()) {
+#'     txdb <- get(
+#'         "TxDb.Hsapiens.UCSC.hg38.knownGene",
+#'         envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+#'     )
+#'     genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+#'     resources <- build_tx_resources(txdb)
+#'     foreground <- GenomicRanges::GRanges(
+#'         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+#'     )
+#'     make_motif_universe(foreground, txdb, genome, "DRACH", resources)
+#' }
+#'
 #' @return Candidate background sites as \code{GRanges}.
 #' @export
 make_motif_universe <- function(foreground,
@@ -627,6 +670,15 @@ make_motif_universe <- function(foreground,
 #'   for example \code{"region_class"} or \code{"type"}.
 #' @param seed Random seed.
 #' @param return_diagnostics If TRUE, attach diagnostics to metadata.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 60, by = 10), width = 1), strand = "+"
+#' )
+#' gr <- prepare_sites(gr, label = c(1, 1, 1, 0, 0, 0))
+#' S4Vectors::mcols(gr)$gene_id <- rep("gene1", length(gr))
+#' S4Vectors::mcols(gr)$kmer <- rep("GGACT", length(gr))
+#' match_random_background(gr, group_col = "gene_id", kmer_match = TRUE)
 #'
 #' @return A \code{GRanges} with the standard posMatchR match columns.
 #' @export
@@ -712,23 +764,24 @@ match_random_background <- function(gr,
   pair_pos <- integer(0)
   pair_neg <- integer(0)
 
-  set.seed(seed)
   keys <- intersect(unique(group[pos_idx]), unique(group[neg_idx]))
   keys <- keys[!is.na(keys) & nzchar(keys)]
 
-  for (key in keys) {
-    P <- pos_idx[group[pos_idx] == key]
-    N <- neg_idx[group[neg_idx] == key]
-    if (!length(P) || !length(N)) next
+  withr::with_seed(seed, {
+    for (key in keys) {
+      P <- pos_idx[group[pos_idx] == key]
+      N <- neg_idx[group[neg_idx] == key]
+      if (!length(P) || !length(N)) next
 
-    P <- .posmatchr_sample(P)
-    N <- .posmatchr_sample(N)
-    n <- min(length(P), length(N))
-    if (n <= 0L) next
+      P <- .posmatchr_sample(P)
+      N <- .posmatchr_sample(N)
+      n <- min(length(P), length(N))
+      if (n <= 0L) next
 
-    pair_pos <- c(pair_pos, P[seq_len(n)])
-    pair_neg <- c(pair_neg, N[seq_len(n)])
-  }
+      pair_pos <- c(pair_pos, P[seq_len(n)])
+      pair_neg <- c(pair_neg, N[seq_len(n)])
+    }
+  })
 
   # Rebuild all reciprocal pair columns from the selected pairs only. This is
   # deliberately done in one block so stale matching columns from a previous call

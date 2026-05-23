@@ -26,3 +26,13 @@ A subset \code{GRanges}.
 \description{
 Subset to positives and selected matched negatives
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20, 30), width = 1), strand = "+"
+)
+S4Vectors::mcols(gr)$match_set <- c(
+    "positive", "matched_negative", "other"
+)
+subset_bg_set(gr)
+
+}

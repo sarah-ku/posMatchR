@@ -57,3 +57,19 @@ added by \code{add_kmer()}, within the selected transcript space. Matching later
 with \code{kmer_match = TRUE} gives an exact foreground/background k-mer balance
 for successfully matched pairs.
 }
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+    resources <- build_tx_resources(txdb)
+    foreground <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+    )
+    S4Vectors::mcols(foreground)$kmer <- "GGACT"
+    make_kmer_universe(foreground, txdb, genome, resources = resources)
+}
+
+}

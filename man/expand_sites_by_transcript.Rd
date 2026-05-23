@@ -39,3 +39,16 @@ Expanded \code{GRanges}.
 Creates a one-row-per-site-per-transcript representation for 5'UTR/CDS/3'UTR
 or intron features. This is useful for isoform-weighted metagene summaries.
 }
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    gr <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+    )
+    expand_sites_by_transcript(gr, txdb = txdb)
+}
+
+}

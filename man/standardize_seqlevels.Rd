@@ -39,3 +39,10 @@ Renames seqlevels such as \code{1} to \code{Chr1} or \code{chr1} when a
 matching target seqlevel is available. This is useful for cases where TxDb and
 BSgenome packages for the same organism use different chromosome names.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "1", IRanges::IRanges(10, width = 1), strand = "+"
+)
+standardize_seqlevels(gr, target = "chr1")
+
+}

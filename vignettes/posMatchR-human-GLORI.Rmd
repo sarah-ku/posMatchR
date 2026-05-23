@@ -1,6 +1,6 @@
 ---
 title: "Human GLORI site annotation and matched background construction"
-author: "Sarah Rennie"
+author: "posMatchR"
 output:
   BiocStyle::html_document:
     toc: true
@@ -21,19 +21,28 @@ knitr::opts_chunk$set(
 
 # Overview
 
-This vignette demonstrates a minimal `posMatchR` workflow using a 25,000-site human GLORI HEK293T `GRanges` object. The analysis annotates the sites with transcript context, extracts centred 5-mers, builds a candidate background universe from foreground-observed 5-mers with at least 100 foreground instances, and performs exact centred 5-mer matching.
+This vignette demonstrates a minimal `posMatchR` workflow using a 25,000 m6A site human GLORI HEK293T `GRanges` object. The analysis annotates the sites with transcript context, extracts centred 5-mers, builds a candidate background universe from the GLORI-observed 5-mers with at least 100 foreground instances, and performs exact centred 5-mer matching.
 
 # Resources
 
-```{r resources}
+```{r packages}
 library(posMatchR)
 
 txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
 genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
 orgdb <- org.Hs.eg.db::org.Hs.eg.db
 human_chrs <- paste0("chr", c(1:22, "X", "Y"))
+```
 
-resources <- build_tx_resources(txdb)
+This vignette uses a precomputed transcript-resource object for the human hg38 knownGene TxDb. This keeps package checks fast; the equivalent object can be rebuilt with `build_tx_resources(txdb)` or with the script in `inst/scripts/make_human_glori_tx_resources_cache.R`.
+
+```{r resources}
+resource_file <- system.file(
+    "extdata", "hg38_knownGene_tx_resources_GLORI_demo.rds",
+    package = "posMatchR",
+    mustWork = TRUE
+)
+resources <- readRDS(resource_file)
 ```
 
 # Load and annotate GLORI sites
@@ -48,8 +57,11 @@ glori_file <- system.file(
 )
 
 sites <- load_sites(glori_file)
+sites <- sites[seq_len(min(length(sites), 5000L))]
 sites
 ```
+
+Adds annotations to the single-width GRange object.
 
 ```{r annotate-sites}
 sites <- annotate_sites(
@@ -86,11 +98,14 @@ plot_junction_distance_density(sites)
 plot_kmer_counts(sites, top_n = 15)
 ```
 
+
+Stop here if only interested in annotations and a background set is not required.
+
 # Build and match a 5-mer background
 
-Candidate background sites are generated from foreground-observed centred 5-mers that occur at least 100 times in the foreground. The matched background requires exact centred 5-mer agreement between each retained positive site and its selected negative site.
+Candidate background sites are generated from the GLORI-observed centred 5-mers that occur at least 100 times in the foreground. The matched background requires exact centred 5-mer agreement between each retained positive site and its selected negative site.
 
-```{r build-background}
+```{r universe}
 background <- make_kmer_universe(
     foreground = sites,
     txdb = txdb,
@@ -103,6 +118,7 @@ background <- make_kmer_universe(
     exclude_foreground = TRUE
 )
 
+# annotate all sites
 combined <- combine_site_sets(sites, background)
 combined <- annotate_sites(
     gr = combined,
@@ -118,12 +134,16 @@ combined <- annotate_sites(
     drop_unannotated = TRUE
 )
 combined <- add_kmer(combined, genome = genome, k = 5, seqstyle = "UCSC", chrs = human_chrs)
+```
 
+The following generates a background set based on matched metagene and geometry features.
+
+```{r build-background}
 matched <- match_background(
     gr = combined,
     kmer_match = TRUE,
     kmer_col = "kmer",
-    bin_match = FALSE
+    bin_match = TRUE
 )
 matched_pairs <- subset_matched_sets(matched)
 matched_pairs

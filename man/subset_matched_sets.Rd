@@ -20,3 +20,13 @@ selected matched negatives.
 Convenience alias for \code{\link{subset_matched_pairs}}. This is the
 object that should usually be passed to matched-set diagnostic plots.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+)
+gr <- prepare_sites(gr, label = c(1, 0))
+S4Vectors::mcols(gr)$matched_negative_id <- c(names(gr)[2], NA)
+S4Vectors::mcols(gr)$matched_positive_id <- c(NA, names(gr)[1])
+subset_matched_sets(gr)
+
+}

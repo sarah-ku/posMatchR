@@ -18,3 +18,18 @@ add_metagene_split(gr, resources)
 Expands each site to overlapping transcript isoforms, computes per-isoform metagene
 coordinates, and collapses back to one mean coordinate per original site.
 }
+\examples{
+if (interactive()) {
+    txdb <- get(
+        "TxDb.Hsapiens.UCSC.hg38.knownGene",
+        envir = asNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene")
+    )
+    resources <- build_tx_resources(txdb)
+    gr <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
+    )
+    gr <- annotate_sites(gr, txdb = txdb, resources = resources)
+    add_metagene_split(gr, resources = resources)
+}
+
+}

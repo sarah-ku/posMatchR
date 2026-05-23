@@ -130,3 +130,13 @@ positions are reported in RNA orientation: for minus-strand focal sites,
 upstream/downstream positions are flipped so that +10 means 10 nt downstream in
 the transcript direction.
 }
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(20, 40), width = 1), strand = c("+", "+")
+)
+features <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(22, 43), width = 1), strand = c("+", "+")
+)
+site_enrichment_profile(gr, query = features, window = 5, smooth_window = 1)
+
+}

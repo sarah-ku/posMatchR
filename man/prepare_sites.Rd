@@ -19,7 +19,7 @@ prepare_sites(
 
 \item{label}{Optional scalar or vector of 0/1 labels to write to \code{label_col}.}
 
-\item{label_col}{Metadata column used for labels.}
+\item{label_col}{Metadata column used when \code{label} is supplied.}
 
 \item{site_id_col}{Metadata column used for stable site identifiers.}
 
@@ -36,4 +36,11 @@ A single-nucleotide \code{GRanges}.
 Normalises a user-supplied \code{GRanges} for posMatchR. The function enforces
 single-nucleotide ranges, creates stable site identifiers, and optionally sets a
 binary label column. Arbitrary existing metadata are preserved by default.
+}
+\examples{
+gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+)
+prepare_sites(gr)
+
 }

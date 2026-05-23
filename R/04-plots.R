@@ -86,6 +86,13 @@
 #'   or \code{"numeric"} to show the numeric metagene coordinate.
 #' @param x_label Optional x-axis title.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+#' )
+#' S4Vectors::mcols(gr)$metagene_split3 <- seq(0.2, 2.8, length.out = length(gr))
+#' plot_metagene_density(gr)
+#'
 #' @return A ggplot object.
 #' @export
 plot_metagene_density <- function(gr,
@@ -159,6 +166,13 @@ plot_metagene_density <- function(gr,
 #' @param x_label Optional x-axis title.
 #' @param breaks_bp Tick marks to show on the original bp scale when \code{transform = "log1p"}.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+#' )
+#' S4Vectors::mcols(gr)$nearest_exon_junction_dist <- seq(10, 100, by = 10)
+#' plot_distance_density(gr, "nearest_exon_junction_dist", facet_by_location = FALSE)
+#'
 #' @return A ggplot object.
 #' @export
 plot_distance_density <- function(gr,
@@ -225,6 +239,13 @@ plot_distance_density <- function(gr,
 #' @param distance_col Junction distance column.
 #' @param ... Passed to \code{\link{plot_distance_density}}.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+#' )
+#' S4Vectors::mcols(gr)$nearest_exon_junction_dist <- seq(10, 100, by = 10)
+#' plot_junction_distance_density(gr, facet_by_location = FALSE)
+#'
 #' @return A ggplot object.
 #' @export
 plot_junction_distance_density <- function(gr,
@@ -252,6 +273,13 @@ plot_junction_distance_density <- function(gr,
 #' @param facet_by_location If TRUE, facet by location.
 #' @param location_col Location column.
 #' @param bw_adjust Bandwidth multiplier.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+#' )
+#' S4Vectors::mcols(gr)$nearest_exon_junction_dist <- seq(10, 100, by = 10)
+#' plot_splice_distance_density(gr, facet_by_location = FALSE)
 #'
 #' @return A ggplot object.
 #' @export
@@ -320,6 +348,14 @@ plot_splice_distance_density <- function(gr,
 #' @param transform Either \code{"log1p"} or \code{"identity"}.
 #' @param bw_adjust Density bandwidth multiplier.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+#' )
+#' S4Vectors::mcols(gr)$start_dist <- seq(10, 100, by = 10)
+#' S4Vectors::mcols(gr)$stop_dist <- rev(seq(10, 100, by = 10))
+#' plot_start_stop_distance_density(gr)
+#'
 #' @return A ggplot object.
 #' @export
 plot_start_stop_distance_density <- function(gr,
@@ -373,6 +409,16 @@ plot_start_stop_distance_density <- function(gr,
 #' @param log1p_first If TRUE, bin log1p(width).
 #' @param facet_by_location If TRUE, facet by location.
 #' @param location_col Location column.
+#' @param use_existing_bin_col If TRUE, use an existing matcher bin column named
+#'   \code{bin_<width_col>} when present; otherwise compute quantile bins from
+#'   \code{width_col}.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+#' )
+#' S4Vectors::mcols(gr)$feature_width <- seq(100, 1000, length.out = length(gr))
+#' plot_feature_width_bins(gr, n_bins = 3, facet_by_location = FALSE)
 #'
 #' @return A ggplot object.
 #' @export
@@ -460,6 +506,13 @@ plot_feature_width_bins <- function(gr,
 #' @param kmer_col K-mer column.
 #' @param top_n Number of top k-mers to show.
 #'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 60, by = 10), width = 1), strand = "+"
+#' )
+#' S4Vectors::mcols(gr)$kmer <- c("GGACT", "GGACT", "AGACT", "AGACT", "AAACA", "AAACA")
+#' plot_kmer_counts(gr, top_n = 3)
+#'
 #' @return A ggplot object.
 #' @export
 plot_kmer_counts <- function(gr,
@@ -545,22 +598,20 @@ plot_kmer_counts <- function(gr,
   mats <- list()
   names_out <- character(0)
 
-  add_vec <- function(name, value) {
-    value <- suppressWarnings(as.numeric(value))
-    mats[[length(mats) + 1L]] <<- value
-    names_out[[length(names_out) + 1L]] <<- name
-  }
-
   for (cl in features) {
     if (!(cl %in% colnames(mc))) next
     v <- mc[[cl]]
     if (is.numeric(v) || is.integer(v) || is.logical(v)) {
-      add_vec(cl, v)
+      mats[[length(mats) + 1L]] <- suppressWarnings(as.numeric(v))
+      names_out <- c(names_out, cl)
     } else {
       vv <- as.character(v)
       lv <- sort(unique(vv[!is.na(vv) & nzchar(vv)]))
       if (length(lv) > 1L && length(lv) <= 25L) {
-        for (x in lv) add_vec(paste0(cl, "=", x), as.integer(vv == x))
+        for (x in lv) {
+          mats[[length(mats) + 1L]] <- as.integer(vv == x)
+          names_out <- c(names_out, paste0(cl, "=", x))
+        }
       }
     }
   }
@@ -592,6 +643,16 @@ plot_kmer_counts <- function(gr,
 #' @param max_unmatched_positive Maximum number of unmatched positives to include.
 #' @param seed Random seed for diagnostic sampling.
 #' @param center,scale Passed to \code{stats::prcomp()}.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+#' )
+#' gr <- prepare_sites(gr, label = rep(c(1, 0), length.out = length(gr)))
+#' S4Vectors::mcols(gr)$match_set <- rep(c("positive", "matched_negative"), 5)
+#' S4Vectors::mcols(gr)$metagene_split3 <- seq(0.2, 2.8, length.out = length(gr))
+#' S4Vectors::mcols(gr)$feature_width <- seq(100, 1000, length.out = length(gr))
+#' matching_pca_data(gr, features = c("metagene_split3", "feature_width"))
 #'
 #' @return A data.frame with PC coordinates, plotting status, row identifiers,
 #'   and attributes containing the \code{prcomp} object and features used.
@@ -625,18 +686,19 @@ matching_pca_data <- function(gr,
   keep <- rep(FALSE, length(gr))
   keep[status %in% c("matched_positive", "matched_negative")] <- TRUE
 
-  set.seed(seed)
-  idx_unselected <- which(status == "unselected_negative")
-  if (length(idx_unselected)) {
-    n <- min(length(idx_unselected), as.integer(max_unselected))
-    keep[.posmatchr_sample(idx_unselected, size = n)] <- TRUE
-  }
+  withr::with_seed(seed, {
+    idx_unselected <- which(status == "unselected_negative")
+    if (length(idx_unselected)) {
+      n <- min(length(idx_unselected), as.integer(max_unselected))
+      keep[.posmatchr_sample(idx_unselected, size = n)] <- TRUE
+    }
 
-  idx_unmatched_pos <- which(status == "unmatched_positive")
-  if (length(idx_unmatched_pos)) {
-    n <- min(length(idx_unmatched_pos), as.integer(max_unmatched_positive))
-    keep[.posmatchr_sample(idx_unmatched_pos, size = n)] <- TRUE
-  }
+    idx_unmatched_pos <- which(status == "unmatched_positive")
+    if (length(idx_unmatched_pos)) {
+      n <- min(length(idx_unmatched_pos), as.integer(max_unmatched_positive))
+      keep[.posmatchr_sample(idx_unmatched_pos, size = n)] <- TRUE
+    }
+  })
 
   idx <- which(keep)
   if (length(idx) < 3L) stop("Too few rows available for PCA diagnostic plot.")
@@ -710,18 +772,19 @@ matching_pca_data <- function(gr,
   keep <- rep(FALSE, length(gr))
   keep[status %in% c("matched_positive", "matched_negative")] <- TRUE
 
-  set.seed(seed)
-  idx_unselected <- which(status == "unselected_negative")
-  if (length(idx_unselected)) {
-    n <- min(length(idx_unselected), as.integer(max_unselected))
-    keep[.posmatchr_sample(idx_unselected, size = n)] <- TRUE
-  }
+  withr::with_seed(seed, {
+    idx_unselected <- which(status == "unselected_negative")
+    if (length(idx_unselected)) {
+      n <- min(length(idx_unselected), as.integer(max_unselected))
+      keep[.posmatchr_sample(idx_unselected, size = n)] <- TRUE
+    }
 
-  idx_unmatched_pos <- which(status == "unmatched_positive")
-  if (length(idx_unmatched_pos)) {
-    n <- min(length(idx_unmatched_pos), as.integer(max_unmatched_positive))
-    keep[.posmatchr_sample(idx_unmatched_pos, size = n)] <- TRUE
-  }
+    idx_unmatched_pos <- which(status == "unmatched_positive")
+    if (length(idx_unmatched_pos)) {
+      n <- min(length(idx_unmatched_pos), as.integer(max_unmatched_positive))
+      keep[.posmatchr_sample(idx_unmatched_pos, size = n)] <- TRUE
+    }
+  })
 
   idx <- which(keep)
   if (length(idx) < 4L) stop("Too few rows available for UMAP diagnostic plot.")
@@ -749,16 +812,18 @@ matching_pca_data <- function(gr,
   if (!is.finite(n_neighbors) || n_neighbors < 2L) n_neighbors <- 2L
   n_neighbors <- min(n_neighbors, nrow(X_mat) - 1L)
 
-  set.seed(seed)
-  emb <- uwot::umap(
-    X_mat,
-    n_components = 2L,
-    n_neighbors = n_neighbors,
-    min_dist = min_dist,
-    metric = metric,
-    n_threads = n_threads,
-    n_sgd_threads = 1L,
-    verbose = FALSE
+  emb <- withr::with_seed(
+    seed,
+    uwot::umap(
+      X_mat,
+      n_components = 2L,
+      n_neighbors = n_neighbors,
+      min_dist = min_dist,
+      metric = metric,
+      n_threads = n_threads,
+      n_sgd_threads = 1L,
+      verbose = FALSE
+    )
   )
 
   out <- data.frame(
@@ -802,6 +867,16 @@ matching_pca_data <- function(gr,
 #' @param umap_n_neighbors,umap_min_dist,umap_metric,umap_n_threads UMAP
 #'   settings used when \code{reduction = "umap"}. The optional package
 #'   \pkg{uwot} must be installed.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(seq(10, 100, by = 10), width = 1), strand = "+"
+#' )
+#' gr <- prepare_sites(gr, label = rep(c(1, 0), length.out = length(gr)))
+#' S4Vectors::mcols(gr)$match_set <- rep(c("positive", "matched_negative"), 5)
+#' S4Vectors::mcols(gr)$metagene_split3 <- seq(0.2, 2.8, length.out = length(gr))
+#' S4Vectors::mcols(gr)$feature_width <- seq(100, 1000, length.out = length(gr))
+#' plot_matching_pca(gr, features = c("metagene_split3", "feature_width"))
 #'
 #' @return A ggplot object.
 #' @export
@@ -938,6 +1013,14 @@ plot_matching_pca <- function(gr,
 #' @param negative_value Value marking matched negatives.
 #' @param subset_first If TRUE, call \code{subset_matched_sets()} before counting
 #'   when canonical match-ID columns are present.
+#'
+#' @examples
+#' gr <- GenomicRanges::GRanges(
+#'     "chr1", IRanges::IRanges(c(10, 20), width = 1), strand = "+"
+#' )
+#' S4Vectors::mcols(gr)$match_set <- c("positive", "matched_negative")
+#' S4Vectors::mcols(gr)$kmer <- c("GGACT", "GGACT")
+#' summarise_matched_kmer_balance(gr, subset_first = FALSE)
 #'
 #' @return A data.frame with positive and matched-negative counts by k-mer.
 #' @export
