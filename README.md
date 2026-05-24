@@ -2,7 +2,7 @@
 
 <img src="man/figures/logo.png" align="right" width="180" alt="posMatchR logo" />
 
-`posMatchR` annotates single-nucleotide `GRanges` sites with transcript name, context and features, as well as sequence context. It then can be used to build matched and/or kmer-sequence balanced background sets useful for post-transcriptional point-site analyses.
+`posMatchR` annotates single-nucleotide `GRanges` sites with transcript name, context and features, as well as sequence context. It then can be used to build matched and/or kmer-sequence balanced background sets useful for post-transcriptional point-site analyses, such as motif analysis, comparisons with local RNA features or metagene plots.
 
 The package expects single-nucleotide sites (e.g. genomic positions for m6A sites). Wider ranges are automatically resized to width one during data prepration and annotation.
 
