@@ -7,7 +7,7 @@ Authors@R: person(
     email = "sarah.rennie@bio.ku.dk",
     role = c("aut", "cre"),
     comment = c(ORCID = "0000-0001-9731-6957")
-)
+    )
 Description: Provides a downstream workflow for single-nucleotide RNA site maps
     represented as GRanges objects. Sites are annotated with gene,
     transcript-region, metagene, sequence-context, and local feature-distance
