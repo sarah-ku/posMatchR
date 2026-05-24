@@ -2,13 +2,13 @@
 
 <img src="man/figures/logo.png" align="right" width="180" alt="posMatchR logo" />
 
-`posMatchR` annotates single-nucleotide `GRanges` sites with transcript context and builds matched background sets for post-transcriptional point-site analyses.
+`posMatchR` annotates single-nucleotide `GRanges` sites with transcript name, context and features, as well as sequence context. It then can be used to build matched and/or kmer-sequence balanced background sets useful for post-transcriptional point-site analyses.
 
-The package expects single-nucleotide sites. Wider ranges are resized to width one by `prepare_sites()` and `annotate_sites()`.
+The package expects single-nucleotide sites (e.g. genomic positions for m6A sites). Wider ranges are automatically resized to width one during data prepration and annotation.
 
 ## Sequence-universe functions
 
-`make_kmer_universe()` searches exhaustively for exact occurrences of foreground-observed k-mers. RNA `U` is converted to DNA `T`; k-mers must be same-width `A`/`C`/`G`/`T` strings, and the search does not use motif scores, p-values, or approximate matching.
+In order to generate a set of background candidates (e.g. for motif analysis), `make_kmer_universe()` searches exhaustively for exact occurrences of foreground-observed k-mers (RNA `U` is converted to DNA `T` and k-mers must be same-width `A`/`C`/`G`/`T` strings).
 
 `make_motif_universe()` searches for IUPAC motifs such as `DRACH` using `Biostrings::matchPattern(..., fixed = "subject")`. Thus ambiguity is interpreted in the motif pattern, while ambiguous letters in the genome sequence are treated as fixed subject letters. For `DRACH`, the default site is the central `A` because `site_offset` defaults to the motif centre.
 
