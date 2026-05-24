@@ -6,6 +6,12 @@
 
 The package expects single-nucleotide sites. Wider ranges are resized to width one by `prepare_sites()` and `annotate_sites()`.
 
+## Sequence-universe functions
+
+`make_kmer_universe()` searches exhaustively for exact occurrences of foreground-observed k-mers. RNA `U` is converted to DNA `T`; k-mers must be same-width `A`/`C`/`G`/`T` strings, and the search does not use motif scores, p-values, or approximate matching.
+
+`make_motif_universe()` searches for IUPAC motifs such as `DRACH` using `Biostrings::matchPattern(..., fixed = "subject")`. Thus ambiguity is interpreted in the motif pattern, while ambiguous letters in the genome sequence are treated as fixed subject letters. For `DRACH`, the default site is the central `A` because `site_offset` defaults to the motif centre.
+
 ## Installation
 
 ```r

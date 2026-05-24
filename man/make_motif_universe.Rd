@@ -48,8 +48,14 @@ Candidate background sites as \code{GRanges}.
 }
 \description{
 Scans transcript features for IUPAC DNA/RNA patterns such as \code{"DRACH"}.
-The point site is normally the centre of the motif, or a user-specified
-\code{site_offset}.
+RNA \code{U} is converted to DNA \code{T}. The search space is first
+restricted according to \code{scope} and \code{regions}; by default, the
+function scans 5' UTR, CDS, and 3' UTR features from transcripts belonging
+to foreground genes. Motif matching uses \code{Biostrings::matchPattern()}
+with \code{fixed = "subject"}, so IUPAC ambiguity is interpreted in the
+motif pattern while ambiguous genome letters are not treated as matching
+bases. For DRACH, the default point site is the central A because
+\code{site_offset} defaults to the motif centre.
 }
 \examples{
 if (interactive()) {
@@ -62,7 +68,7 @@ if (interactive()) {
     foreground <- GenomicRanges::GRanges(
         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
     )
-    make_motif_universe(foreground, txdb, genome, "DRACH", resources)
+    make_motif_universe(foreground, txdb, genome, "DRACH", resources = resources)
 }
 
 }

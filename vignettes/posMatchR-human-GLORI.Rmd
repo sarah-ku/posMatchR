@@ -61,7 +61,7 @@ sites <- sites[seq_len(min(length(sites), 5000L))]
 sites
 ```
 
-Adds annotations to the single-width GRange object.
+Adds annotations to the single-width `GRanges` object.
 
 ```{r annotate-sites}
 sites <- annotate_sites(
@@ -103,7 +103,7 @@ Stop here if only interested in annotations and a background set is not required
 
 # Build and match a 5-mer background
 
-Candidate background sites are generated from the GLORI-observed centred 5-mers that occur at least 100 times in the foreground. The matched background requires exact centred 5-mer agreement between each retained positive site and its selected negative site.
+Candidate background sites are generated from the GLORI-observed centred 5-mers that occur at least 100 times in the foreground. `make_kmer_universe()` performs exact matching of same-width A/C/G/T k-mers after U-to-T conversion. The matched background requires exact centred 5-mer agreement between each retained positive site and its selected negative site.
 
 ```{r universe}
 background <- make_kmer_universe(

@@ -27,7 +27,7 @@ make_kmer_universe(
 
 \item{genome}{A BSgenome-like object accepted by \code{Biostrings::getSeq()}.}
 
-\item{kmers}{Optional explicit k-mer vector. If NULL, k-mers are taken from \code{foreground}.}
+\item{kmers}{Optional explicit k-mer vector. If NULL, k-mers are taken from \code{foreground}. K-mers must be same-width A/C/G/T strings after U to T conversion.}
 
 \item{kmer_col}{Metadata column containing observed k-mers.}
 
@@ -52,10 +52,13 @@ or all TxDb transcripts.}
 Candidate background sites as \code{GRanges}.
 }
 \description{
-Finds occurrences of observed k-mers, usually the site-centred k-mers already
-added by \code{add_kmer()}, within the selected transcript space. Matching later
-with \code{kmer_match = TRUE} gives an exact foreground/background k-mer balance
-for successfully matched pairs.
+Finds exact occurrences of foreground-observed k-mers, usually the
+site-centred k-mers already added by \code{add_kmer()}, within the selected
+transcript space. RNA \code{U} is converted to DNA \code{T}. The search is
+exhaustive over the selected transcript features and does not use p-values,
+motif scores, or approximate matching. Matching later with \code{kmer_match = TRUE}
+gives an exact foreground/background k-mer balance for successfully matched
+pairs.
 }
 \examples{
 if (interactive()) {

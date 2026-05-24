@@ -1,24 +1,16 @@
-.Rproj.user
-.Rhistory
-.RData
-.DS_Store
-*.tar.gz
-patch*_unpacked/
-posmatchr_*_smoke_results/
-_problems/
-doc/
-Meta/
-README_files/
+# RStudio/user-local state: never commit
+.Rproj.user/
+**/.Rproj.user/
 
-# R/session artefacts
+# macOS/Finder artefacts
+.DS_Store
+__MACOSX/
+**/__MACOSX/
+
+# R session artefacts
 .Rhistory
 .RData
 .Ruserdata
-.Rproj.user/
-*.Rproj.user/
-
-# macOS/system files
-.DS_Store
 
 # Package build/check artefacts
 *.tar.gz
@@ -30,7 +22,3 @@ check/
 build/
 doc/
 Meta/
-
-# Temporary/unpacked patch directories
-patch*_unpacked/
-*_unpacked/

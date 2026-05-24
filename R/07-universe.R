@@ -62,20 +62,12 @@
 }
 
 
-.can_use_pdict <- function(patterns, fixed = TRUE) {
+.can_use_exact_fast_path <- function(patterns, fixed = TRUE) {
   if (!isTRUE(fixed)) return(FALSE)
   patterns <- .iupac_to_plain(patterns)
   if (!length(patterns)) return(FALSE)
   if (!all(nchar(patterns) == nchar(patterns[1L]))) return(FALSE)
   all(grepl("^[ACGT]+$", patterns))
-}
-
-.make_pdict <- function(patterns) {
-  if (!.can_use_pdict(patterns, fixed = TRUE)) return(NULL)
-  tryCatch(
-    Biostrings::PDict(Biostrings::DNAStringSet(patterns)),
-    error = function(e) NULL
-  )
 }
 
 .scan_exact_kmer_positions <- function(sequence, patterns) {
@@ -113,7 +105,7 @@
   )
 }
 
-.scan_pattern_positions <- function(sequence, patterns, fixed = TRUE, pdict = NULL) {
+.scan_pattern_positions <- function(sequence, patterns, fixed = TRUE) {
   sequence <- .iupac_to_plain(sequence)
   patterns <- .iupac_to_plain(patterns)
   if (is.na(sequence) || !nzchar(sequence)) {
@@ -121,27 +113,10 @@
   }
 
   # Fast exact-k-mer path: enumerate all width-k windows in the subject once
-  # and use vectorised membership testing. This avoids looping over every
-  # k-mer for every transcript segment when the dictionary contains many
-  # concrete 5-mers.
-  if (.can_use_pdict(patterns, fixed = fixed)) {
+  # and use vectorised membership testing. This path is used only for exact
+  # same-width A/C/G/T dictionaries, such as foreground-observed centred k-mers.
+  if (.can_use_exact_fast_path(patterns, fixed = fixed)) {
     return(.scan_exact_kmer_positions(sequence, patterns))
-  }
-
-  if (!is.null(pdict)) {
-    hits <- Biostrings::matchPDict(pdict, Biostrings::DNAString(sequence))
-    starts <- vector("list", length(patterns))
-    for (j in seq_along(patterns)) {
-      hj <- hits[[j]]
-      if (length(hj)) starts[[j]] <- as.integer(IRanges::start(hj))
-    }
-    lens <- vapply(starts, length, integer(1))
-    idx <- which(lens > 0L)
-    if (!length(idx)) return(data.frame(pattern_i = integer(0), hit_start = integer(0)))
-    return(data.frame(
-      pattern_i = rep(idx, lens[idx]),
-      hit_start = as.integer(unlist(starts[idx], use.names = FALSE))
-    ))
   }
 
   out <- vector("list", length(patterns))
@@ -168,7 +143,7 @@
                                       gene_by_tx,
                                       candidate_type) {
   patterns <- .iupac_to_plain(patterns)
-  if (!.can_use_pdict(patterns, fixed = TRUE)) {
+  if (!.can_use_exact_fast_path(patterns, fixed = TRUE)) {
     stop("Internal error: .scan_exact_kmer_segments requires exact same-width A/C/G/T patterns.")
   }
 
@@ -291,7 +266,6 @@
     stop("Each `site_offset` must be between 1 and the corresponding pattern width.")
   }
 
-  pdict <- if (.can_use_pdict(patterns, fixed = fixed)) NULL else .make_pdict(patterns)
 
   tx_metrics <- as.data.frame(resources$tx_metrics, stringsAsFactors = FALSE)
   tx_key <- if (!is.null(resources$tx_key)) resources$tx_key else .tx_key_from_metrics(tx_metrics)
@@ -317,7 +291,7 @@
       segs_all <- unlist(gl, use.names = FALSE)
       seqs_all <- as.character(Biostrings::getSeq(genome, segs_all))
 
-      if (.can_use_pdict(patterns, fixed = fixed)) {
+      if (.can_use_exact_fast_path(patterns, fixed = fixed)) {
         gr_region <- .scan_exact_kmer_segments(
           segs = segs_all,
           seqs = seqs_all,
@@ -343,7 +317,7 @@
         st <- as.character(GenomicRanges::strand(seg))
         if (is.na(st) || !nzchar(st)) st <- "*"
 
-        hit_df <- .scan_pattern_positions(seq_i, patterns, fixed = fixed, pdict = pdict)
+        hit_df <- .scan_pattern_positions(seq_i, patterns, fixed = fixed)
         if (!nrow(hit_df)) next
 
         offset0 <- hit_df$hit_start + site_offset[hit_df$pattern_i] - 2L
@@ -386,7 +360,7 @@
       cum_end <- cumsum(widths)
       cum_start0 <- c(0L, cum_end[-length(cum_end)])
 
-      hit_df <- .scan_pattern_positions(tx_seq, patterns, fixed = fixed, pdict = pdict)
+      hit_df <- .scan_pattern_positions(tx_seq, patterns, fixed = fixed)
       if (!nrow(hit_df)) next
 
       tx_pos <- hit_df$hit_start + site_offset[hit_df$pattern_i] - 1L
@@ -520,15 +494,18 @@ make_base_universe <- function(foreground,
 
 #' Build a foreground k-mer background universe
 #'
-#' Finds occurrences of observed k-mers, usually the site-centred k-mers already
-#' added by \code{add_kmer()}, within the selected transcript space. Matching later
-#' with \code{kmer_match = TRUE} gives an exact foreground/background k-mer balance
-#' for successfully matched pairs.
+#' Finds exact occurrences of foreground-observed k-mers, usually the
+#' site-centred k-mers already added by \code{add_kmer()}, within the selected
+#' transcript space. RNA \code{U} is converted to DNA \code{T}. The search is
+#' exhaustive over the selected transcript features and does not use p-values,
+#' motif scores, or approximate matching. Matching later with \code{kmer_match = TRUE}
+#' gives an exact foreground/background k-mer balance for successfully matched
+#' pairs.
 #'
 #' @param foreground Annotated foreground \code{GRanges} containing \code{kmer_col}.
 #' @param txdb A \code{TxDb} with seqlevels compatible with \code{genome}.
 #' @param genome A BSgenome-like object accepted by \code{Biostrings::getSeq()}.
-#' @param kmers Optional explicit k-mer vector. If NULL, k-mers are taken from \code{foreground}.
+#' @param kmers Optional explicit k-mer vector. If NULL, k-mers are taken from \code{foreground}. K-mers must be same-width A/C/G/T strings after U to T conversion.
 #' @param kmer_col Metadata column containing observed k-mers.
 #' @param min_count Drop foreground k-mers observed fewer than this many times.
 #' @param site_offset One-based position in the k-mer to use as the point site. NULL uses the centre.
@@ -576,11 +553,29 @@ make_kmer_universe <- function(foreground,
     if (!length(kmers)) stop("No k-mers remain after min_count filtering.")
   }
 
+  kmers <- unique(.iupac_to_plain(kmers))
+  kmers <- kmers[!is.na(kmers) & nzchar(kmers)]
+  if (!length(kmers)) stop("No valid k-mers supplied.")
+
+  kmer_widths <- nchar(kmers)
+  if (!all(kmer_widths == kmer_widths[1L])) {
+    stop("`make_kmer_universe()` requires same-width k-mers.")
+  }
+  invalid_kmers <- !grepl("^[ACGT]+$", kmers)
+  if (any(invalid_kmers)) {
+    stop(
+      "`make_kmer_universe()` requires exact A/C/G/T k-mers after U->T conversion. ",
+      "Invalid k-mer(s): ",
+      paste(utils::head(kmers[invalid_kmers], 10L), collapse = ", "),
+      if (sum(invalid_kmers) > 10L) ", ..." else ""
+    )
+  }
+
   .scan_universe_patterns(
     foreground = foreground,
     txdb = txdb,
     genome = genome,
-    patterns = unique(kmers),
+    patterns = kmers,
     fixed = TRUE,
     resources = resources,
     scope = scope,
@@ -597,8 +592,14 @@ make_kmer_universe <- function(foreground,
 #' Build an IUPAC motif background universe
 #'
 #' Scans transcript features for IUPAC DNA/RNA patterns such as \code{"DRACH"}.
-#' The point site is normally the centre of the motif, or a user-specified
-#' \code{site_offset}.
+#' RNA \code{U} is converted to DNA \code{T}. The search space is first
+#' restricted according to \code{scope} and \code{regions}; by default, the
+#' function scans 5' UTR, CDS, and 3' UTR features from transcripts belonging
+#' to foreground genes. Motif matching uses \code{Biostrings::matchPattern()}
+#' with \code{fixed = "subject"}, so IUPAC ambiguity is interpreted in the
+#' motif pattern while ambiguous genome letters are not treated as matching
+#' bases. For DRACH, the default point site is the central A because
+#' \code{site_offset} defaults to the motif centre.
 #'
 #' @param patterns One or more IUPAC patterns. \code{U} is treated as \code{T}.
 #' @param site_offset One-based motif position to use as the point site. NULL uses the centre.
@@ -615,7 +616,7 @@ make_kmer_universe <- function(foreground,
 #'     foreground <- GenomicRanges::GRanges(
 #'         "chr1", IRanges::IRanges(11874, width = 1), strand = "+"
 #'     )
-#'     make_motif_universe(foreground, txdb, genome, "DRACH", resources)
+#'     make_motif_universe(foreground, txdb, genome, "DRACH", resources = resources)
 #' }
 #'
 #' @return Candidate background sites as \code{GRanges}.
@@ -636,7 +637,7 @@ make_motif_universe <- function(foreground,
     txdb = txdb,
     genome = genome,
     patterns = patterns,
-    fixed = FALSE,
+    fixed = "subject",
     resources = resources,
     scope = scope,
     regions = regions,

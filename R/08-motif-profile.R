@@ -199,7 +199,7 @@
     seq_i <- seqs[[i]]
     for (j in seq_along(patterns)) {
       pat <- Biostrings::DNAString(patterns[j])
-      hits <- Biostrings::matchPattern(pat, seq_i, fixed = FALSE)
+      hits <- Biostrings::matchPattern(pat, seq_i, fixed = "subject")
       if (length(hits)) {
         st <- IRanges::start(hits)
         en <- IRanges::end(hits)
@@ -216,7 +216,7 @@
 
       if (isTRUE(scan_rc)) {
         rc <- Biostrings::reverseComplement(pat)
-        hits <- Biostrings::matchPattern(rc, seq_i, fixed = FALSE)
+        hits <- Biostrings::matchPattern(rc, seq_i, fixed = "subject")
         if (length(hits)) {
           st <- IRanges::start(hits)
           en <- IRanges::end(hits)
@@ -317,8 +317,10 @@
 #' directly from the input \code{GRanges} with \code{BSgenome::getSeq()};
 #' because the strand is retained, reverse-strand sites are returned in their
 #' RNA/transcript orientation. Character motifs are treated as exact/IUPAC DNA
-#' or RNA patterns; RNA U is converted to DNA T. Set \code{method =
-#' "universalmotif"} to scan consensus/PWM motifs with
+#' or RNA patterns; RNA U is converted to DNA T. IUPAC ambiguity is
+#' interpreted in the motif pattern while ambiguous genome letters are treated
+#' as fixed subject letters. Set \code{method = "universalmotif"} to scan
+#' consensus/PWM motifs with
 #' \code{universalmotif::scan_sequences()}.
 #'
 #' @param gr A single-nucleotide \code{GRanges}. For matched-set comparisons, pass

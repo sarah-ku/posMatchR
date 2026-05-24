@@ -1,6 +1,7 @@
 Package: posMatchR
 Type: Package
-Title: Annotate Single-Nucleotide RNA Sites and Build Matched Backgrounds
+Title: Annotate Single-Nucleotide RNA Sites and Build Matched
+        Backgrounds
 Version: 0.99.0
 Authors@R: person(
     "Sarah", "Rennie",
@@ -12,40 +13,20 @@ Description: Provides a downstream workflow for single-nucleotide RNA site maps 
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-Depends:
-    R (>= 4.2)
-Imports:
-    methods,
-    stats,
-    utils,
-    GenomicRanges,
-    GenomicFeatures,
-    VariantAnnotation,
-    S4Vectors,
-    IRanges,
-    GenomeInfoDb,
-    Biostrings,
-    ggplot2,
-    withr
-Suggests:
-    AnnotationDbi,
-    BSgenome,
-    TxDb.Hsapiens.UCSC.hg38.knownGene,
-    TxDb.Athaliana.BioMart.plantsmart51,
-    BSgenome.Hsapiens.UCSC.hg38,
-    BSgenome.Athaliana.TAIR.TAIR9,
-    org.Hs.eg.db,
-    org.At.tair.db,
-    rtracklayer,
-    universalmotif,
-    uwot,
-    testthat (>= 3.0.0),
-    BiocStyle,
-    knitr,
-    rmarkdown
-biocViews: Software, Annotation, GenomeAnnotation, Sequencing, Visualization
+Depends: R (>= 4.2)
+Imports: methods, stats, utils, GenomicRanges, GenomicFeatures,
+        VariantAnnotation, S4Vectors, IRanges, GenomeInfoDb,
+        Biostrings, ggplot2, withr
+Suggests: AnnotationDbi, BSgenome, TxDb.Hsapiens.UCSC.hg38.knownGene,
+        TxDb.Athaliana.BioMart.plantsmart51,
+        BSgenome.Hsapiens.UCSC.hg38, BSgenome.Athaliana.TAIR.TAIR9,
+        org.Hs.eg.db, org.At.tair.db, rtracklayer, universalmotif,
+        uwot, testthat (>= 3.0.0), BiocStyle, knitr, rmarkdown
+biocViews: Software, Annotation, GenomeAnnotation, MotifAnnotation,
+        Sequencing, Visualization
 Config/testthat/edition: 3
 URL: https://github.com/sarah-ku/posMatchR
 BugReports: https://github.com/sarah-ku/posMatchR/issues
 VignetteBuilder: knitr
 Config/roxygen2/version: 8.0.0
+NeedsCompilation: no
