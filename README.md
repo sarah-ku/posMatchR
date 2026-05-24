@@ -2,15 +2,15 @@
 
 <img src="man/figures/logo.png" align="right" width="180" alt="posMatchR logo" />
 
-`posMatchR` annotates single-nucleotide `GRanges` sites with transcript name, context and features, as well as sequence context. It then can be used to build matched and/or kmer-sequence balanced background sets useful for post-transcriptional point-site analyses, such as motif analysis, comparisons with local RNA features or metagene plots.
+`posMatchR` annotates single-nucleotide `GRanges` sites with transcript context and builds matched background sets for post-transcriptional point-site analyses.
 
-The package expects single-nucleotide sites (e.g. genomic positions for m6A sites). Wider ranges are automatically resized to width one during data prepration and annotation.
+The package expects single-nucleotide sites. Wider ranges are resized to width one by `prepare_sites()` and `annotate_sites()`.
 
 ## Sequence-universe functions
 
-In order to generate a set of background candidates (e.g. for motif analysis), `make_kmer_universe()` searches exhaustively for exact occurrences of foreground-observed k-mers (RNA `U` is converted to DNA `T` and k-mers must be same-width `A`/`C`/`G`/`T` strings).
+`make_kmer_universe()` searches exhaustively for exact occurrences of foreground-observed k-mers. RNA `U` is converted to DNA `T`; k-mers must be same-width `A`/`C`/`G`/`T` strings, and the search does not use motif scores, p-values, or approximate matching.
 
-`make_motif_universe()` searches for IUPAC motifs (e.g. such as `DRACH` for m6A analysis) using `Biostrings::matchPattern()` functionality. Note that for motifs like `DRACH`, the default site is the central `A` because `site_offset` defaults to the motif centre.
+`make_motif_universe()` searches for IUPAC motifs such as `DRACH` using `Biostrings::matchPattern(..., fixed = "subject")`. Thus ambiguity is interpreted in the motif pattern, while ambiguous letters in the genome sequence are treated as fixed subject letters. For `DRACH`, the default site is the central `A` because `site_offset` defaults to the motif centre.
 
 ## Installation
 
@@ -40,7 +40,7 @@ BiocManager::install(c(
 
 ## Minimal GLORI example
 
-This example uses the bundled 25,000-site GLORI HEK293T `GRanges` object in `inst/extdata/GLORI_HEK293T_25K.Rdat`, restricted to the first 5,000 sites so the quick-start remains fast. The workflow annotates the positive sites, loads a precomputed human transcript-resource object (this can be generated in the package for the species of interest, but we supply a cached version for hg38 since it takes some time), builds a candidate background universe from foreground-observed centred 5-mers with at least 100 foreground instances, and matches positives to negatives with exact centred 5-mer matching.
+This example uses the bundled 25,000-site GLORI HEK293T `GRanges` object in `inst/extdata/GLORI_HEK293T_25K.Rdat`, restricted to the first 5,000 sites so the quick-start remains fast. The workflow annotates the positive sites, loads a precomputed human transcript-resource object, builds a candidate background universe from foreground-observed centred 5-mers with at least 100 foreground instances, and matches positives to negatives with exact centred 5-mer matching.
 
 ```r
 library(posMatchR)

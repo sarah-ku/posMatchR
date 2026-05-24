@@ -1,29 +1,61 @@
 Package: posMatchR
 Type: Package
-Title: Annotate Single-Nucleotide RNA Sites and Build Matched
-        Backgrounds
+Title: Annotate Single-Nucleotide RNA Sites and Build Matched Backgrounds
 Version: 0.99.0
 Authors@R: person(
     "Sarah", "Rennie",
     email = "sarah.rennie@bio.ku.dk",
     role = c("aut", "cre"),
     comment = c(ORCID = "0000-0001-9731-6957")
-    )
-Description: Provides a downstream workflow for single-nucleotide RNA site maps represented as GRanges objects. Sites are annotated with gene, transcript-region, metagene, sequence-context, and local feature-distance variables using user-supplied Bioconductor annotation resources. These annotations can be used to visualise transcript context and to construct matched background sets for motif, point-feature, and related enrichment analyses.
+)
+Description: Provides a downstream workflow for single-nucleotide RNA site maps
+    represented as GRanges objects. Sites are annotated with gene,
+    transcript-region, metagene, sequence-context, and local feature-distance
+    variables using user-supplied Bioconductor annotation resources. These
+    annotations can be used to visualise transcript context and to construct
+    matched background sets for motif, point-feature, and related enrichment
+    analyses.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-Depends: R (>= 4.2)
-Imports: methods, stats, utils, GenomicRanges, GenomicFeatures,
-        VariantAnnotation, S4Vectors, IRanges, GenomeInfoDb,
-        Biostrings, ggplot2, withr
-Suggests: AnnotationDbi, BSgenome, TxDb.Hsapiens.UCSC.hg38.knownGene,
-        TxDb.Athaliana.BioMart.plantsmart51,
-        BSgenome.Hsapiens.UCSC.hg38, BSgenome.Athaliana.TAIR.TAIR9,
-        org.Hs.eg.db, org.At.tair.db, rtracklayer, universalmotif,
-        uwot, testthat (>= 3.0.0), BiocStyle, knitr, rmarkdown
-biocViews: Software, Annotation, GenomeAnnotation, MotifAnnotation,
-        Sequencing, Visualization
+Depends:
+    R (>= 4.2)
+Imports:
+    methods,
+    stats,
+    utils,
+    GenomicRanges,
+    GenomicFeatures,
+    VariantAnnotation,
+    S4Vectors,
+    IRanges,
+    GenomeInfoDb,
+    Biostrings,
+    ggplot2,
+    withr
+Suggests:
+    AnnotationDbi,
+    BSgenome,
+    TxDb.Hsapiens.UCSC.hg38.knownGene,
+    TxDb.Athaliana.BioMart.plantsmart51,
+    BSgenome.Hsapiens.UCSC.hg38,
+    BSgenome.Athaliana.TAIR.TAIR9,
+    org.Hs.eg.db,
+    org.At.tair.db,
+    rtracklayer,
+    universalmotif,
+    uwot,
+    testthat (>= 3.0.0),
+    BiocStyle,
+    knitr,
+    rmarkdown
+biocViews:
+    Software,
+    Annotation,
+    GenomeAnnotation,
+    MotifAnnotation,
+    Sequencing,
+    Visualization
 Config/testthat/edition: 3
 URL: https://github.com/sarah-ku/posMatchR
 BugReports: https://github.com/sarah-ku/posMatchR/issues
