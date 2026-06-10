@@ -139,3 +139,19 @@ head(summarise_matched_kmer_balance(matched_pairs))
 ```
 
 `matched_pairs` contains the reciprocal positive and matched-negative sites. When `kmer_match = TRUE`, each retained pair has the same centred 5-mer.
+
+## References
+
+The following datasets were used for package testing and demonstration purposes:
+
+GLORI HEK293T m6A sites (Liu et al. 2022)
+https://static-content.springer.com/esm/art%3A10.1038%2Fs41587-022-01487-9/MediaObjects/41587_2022_1487_MOESM3_ESM.xlsx
+ 
+m6A sites in Arabidopsis (Parker et al. 2020)
+https://cdn.elifesciences.org/articles/49658/elife-49658-fig5-data1-v1.tds
+ 
+ECT iCLIP (Arribas-Hernández et al. 2021)
+https://cdn.elifesciences.org/articles/72375/elife-72375-supp2-v2.xlsx
+
+These files are supplied in the repository https://github.com/sarah-ku/posMatchR/tree/master/inst/extdata together with processed GRanges for getting started with the R package.
+
